@@ -104,10 +104,13 @@ export class GameScene extends Phaser.Scene {
   // --- task list HUD ---
   private taskListRows: Phaser.GameObjects.Text[] = [];
 
-  // --- task compass (edge-hugging directional arrow toward tracked task) ---
+  // --- task compass (one directional arrow per incomplete task) ---
   private selectedTaskId: string | null = null;
-  private taskArrow!: Phaser.GameObjects.Container;
-  private taskArrowIcon!: Phaser.GameObjects.Triangle;
+  private taskArrows: {
+    task: TaskDef;
+    container: Phaser.GameObjects.Container;
+    icon: Phaser.GameObjects.Triangle;
+  }[] = [];
 
   // --- UI overlay ---
   // A second, unzoomed camera dedicated to HUD/UI. Camera zoom/rotation on
@@ -463,22 +466,28 @@ export class GameScene extends Phaser.Scene {
   }
 
   /**
-   * Builds an edge-hugging compass arrow: a bare yellow chevron (no ring,
-   * no label — matching the real game's look) that rides along the border
-   * of the screen and rotates every frame to always point from screen
-   * centre toward whichever task is tracked. Tapping a row in the task
-   * list picks that task as the target; otherwise it defaults to the first
-   * incomplete task. Positioning math lives in updateTaskArrow().
+   * Builds one directional-compass arrow per task — bare yellow chevrons
+   * (no ring, no label — matching the real game's look), sized up so they
+   * read clearly on a phone screen. Each arrow tracks its own task: it
+   * rides the border of the screen while the task is far off-screen, or
+   * hovers right next to the task once it's actually in view (see
+   * updateTaskArrows()), and disappears for good once that task is
+   * completed. Tapping a row in the task list still highlights it in the
+   * list (via selectedTaskId/getTrackedTask) but no longer hides/shows
+   * arrows — every incomplete task gets its own arrow simultaneously.
    */
   private buildTaskCompass() {
-    this.taskArrow = this.add.container(0, 0).setDepth(101);
-    this.taskArrowIcon = this.add.triangle(0, 0, 0, -20, 15, 14, -15, 14, 0xffe600)
-      .setStrokeStyle(2.5, 0x3a2c00, 1);
-    this.taskArrow.add(this.taskArrowIcon);
-    this.hud.add(this.taskArrow);
+    for (const task of this.tasks) {
+      const container = this.add.container(0, 0).setDepth(101);
+      const icon = this.add.triangle(0, 0, 0, -38, 28, 26, -28, 26, 0xffe600)
+        .setStrokeStyle(4, 0x3a2c00, 1);
+      container.add(icon);
+      this.hud.add(container);
+      this.taskArrows.push({ task, container, icon });
+    }
   }
 
-  /** Currently tracked task: manually selected one if still incomplete, else the first incomplete task in list order. */
+  /** Currently tracked task: manually selected one if still incomplete, else the first incomplete task in list order. Used only to highlight the task-list row now — arrows track every task independently. */
   private getTrackedTask(): TaskDef | null {
     const selected = this.tasks.find(t => t.id === this.selectedTaskId);
     if (selected && !selected.completed) return selected;
@@ -486,33 +495,54 @@ export class GameScene extends Phaser.Scene {
   }
 
   /**
-   * Positions the compass arrow on the border of the screen and rotates it
-   * to point from screen centre toward the tracked task, every frame —
-   * a 360-degree edge radar, like the real game's task arrow. Once the
-   * player is close enough to actually interact with the task (tracked by
-   * detectNearby() via nearbyTask), the arrow disappears; the task object
-   * itself glows via its highlight texture instead (see updateTaskSprites).
+   * Updates every task's compass arrow, every frame. Two modes, chosen per
+   * arrow based on whether its task is currently within the camera's view:
+   *  - Off-screen: the arrow rides the border of the screen like a 360°
+   *    radar, cast from screen centre toward the task (same technique as
+   *    before).
+   *  - On-screen: the arrow hovers just short of the task's actual screen
+   *    position, pointing straight at it — like the reference screenshots,
+   *    where the arrow sits right beside the objective instead of staying
+   *    pinned to a corner. The task's own highlight texture still takes
+   *    over as the "you're here" signal (see updateTaskSprites); the arrow
+   *    itself only disappears once the task is completed.
    */
-  private updateTaskArrow() {
-    const target = this.getTrackedTask();
-    const atTarget = !!(target && this.nearbyTask && this.nearbyTask.id === target.id);
-    if (!target || atTarget) { this.taskArrow.setVisible(false); return; }
-    this.taskArrow.setVisible(true);
-
-    const angle = Phaser.Math.Angle.Between(this.player.x, this.player.y, target.x, target.y);
-    this.taskArrowIcon.rotation = angle + Math.PI / 2;
-
-    // Edge point: cast a ray from screen centre in `angle` direction and
-    // clip it to a rectangle inset from the true screen border, so the
-    // arrow rides the border like a compass without ever clipping off it.
+  private updateTaskArrows() {
     const { width: W, height: H } = this.scale;
-    const margin = 26;
-    const halfW = W / 2 - margin, halfH = H / 2 - margin;
-    const dx = Math.cos(angle), dy = Math.sin(angle);
-    const tx = dx !== 0 ? halfW / Math.abs(dx) : Infinity;
-    const ty = dy !== 0 ? halfH / Math.abs(dy) : Infinity;
-    const t = Math.min(tx, ty);
-    this.taskArrow.setPosition(W / 2 + dx * t, H / 2 + dy * t);
+    const margin = 30;
+    const cam = this.cameras.main;
+    const view = cam.worldView;
+
+    for (const entry of this.taskArrows) {
+      const { task, container, icon } = entry;
+      if (task.completed) { container.setVisible(false); continue; }
+      container.setVisible(true);
+
+      const angle = Phaser.Math.Angle.Between(this.player.x, this.player.y, task.x, task.y);
+      icon.rotation = angle + Math.PI / 2;
+      const dx = Math.cos(angle), dy = Math.sin(angle);
+
+      // Where the task actually sits on screen right now (camera has no
+      // rotation, so world angle === screen angle exactly; only the origin
+      // differs between the two modes below).
+      const screenX = (task.x - view.x) * cam.zoom;
+      const screenY = (task.y - view.y) * cam.zoom;
+      const onScreen = screenX > margin && screenX < W - margin && screenY > margin && screenY < H - margin;
+
+      if (onScreen) {
+        const hover = 50;
+        container.setPosition(screenX - dx * hover, screenY - dy * hover);
+      } else {
+        // Off-screen: cast a ray from screen centre and clip it to a
+        // rectangle inset from the true screen border, so the arrow rides
+        // the border like a compass without ever clipping off it.
+        const halfW = W / 2 - margin, halfH = H / 2 - margin;
+        const tx = dx !== 0 ? halfW / Math.abs(dx) : Infinity;
+        const ty = dy !== 0 ? halfH / Math.abs(dy) : Infinity;
+        const t = Math.min(tx, ty);
+        container.setPosition(W / 2 + dx * t, H / 2 + dy * t);
+      }
+    }
   }
 
   /**
@@ -557,7 +587,6 @@ export class GameScene extends Phaser.Scene {
         if (task.completed) return;
         this.selectedTaskId = task.id;
         this.updateTaskList();
-        this.updateTaskArrow();
       });
       this.hud.add(hit);
     }
@@ -756,8 +785,8 @@ export class GameScene extends Phaser.Scene {
     // Update task bar
     this.updateTaskBar();
 
-    // Update directional compass arrow toward the tracked task
-    this.updateTaskArrow();
+    // Update per-task directional compass arrows
+    this.updateTaskArrows();
 
     // Win check
     this.checkWinConditions();
