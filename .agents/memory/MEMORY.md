@@ -2,3 +2,4 @@
 - [Phaser image aspect distortion](phaser-image-aspect-distortion.md) — `setDisplaySize(W*fx, H*fy)` with independent width/height fractions silently stretches art when canvas aspect ratio changes; use contain/cover helpers keyed off native texture size instead.
 - [Among Us walk-frame counts](among-us-walk-frame-counts.md) — down has 18 walk frames, up/left/right only 17, for every color; loop bounds must be per-direction.
 - [Among Us known pre-existing bugs](among-us-known-bugs.md) — red visor green, anims.stop() required before setTexture in die().
+- [Among Us UI asset inventory](among-us-ui-asset-inventory.md) — which HUD icons exist as real art in Assets/ vs which (USE/REPORT/settings/chat) have none; never fabricate the missing ones.

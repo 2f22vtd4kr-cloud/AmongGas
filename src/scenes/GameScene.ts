@@ -17,6 +17,12 @@ const BOT_NAMES = ['Alpha','Beta','Gamma','Delta','Epsilon','Zeta','Eta','Theta'
 // animate properly.  Black/Brown/Pink/Purple are fallbacks for extra bots.
 const BOT_COLOR_POOL = ['Blue','Green','Orange','Yellow','Black','Brown','Pink','Purple'];
 
+// Emergency button art (Assets/Images/UI/emergency_icon.png) is 153x130px —
+// displayed at 2x native size so it reads clearly as a large HUD button,
+// matching the scale of the original game's corner buttons.
+const EMERGENCY_BTN_W = 122;
+const EMERGENCY_BTN_H = 104;
+
 /** Texture key variants per world-object name: base / highlight (near) / connected (done). */
 const TASK_SPRITE_VARIANTS: Record<string, { base: string; highlight?: string; connected?: string }> = {
   electricity_wires: { base: 'electricity_wires', highlight: 'electricity_wires_highlight', connected: 'electricity_wires_connected' },
@@ -84,7 +90,7 @@ export class GameScene extends Phaser.Scene {
   private killBtn!: Phaser.GameObjects.Container;
   private useBtn!: Phaser.GameObjects.Container;
   private reportBtn!: Phaser.GameObjects.Container;
-  private emergencyBtn!: Phaser.GameObjects.Text;
+  private emergencyBtn!: Phaser.GameObjects.Container;
   private miniMapBtn!: Phaser.GameObjects.Image;
   private miniMapOverlay?: Phaser.GameObjects.Container;
 
@@ -367,15 +373,18 @@ export class GameScene extends Phaser.Scene {
     }).setOrigin(0.5).setScrollFactor(0).setDepth(101).setVisible(false);
 
     // Emergency meeting button — top-left, shifted down by safe-area inset.
-    this.emergencyBtn = this.add.text(16, 64 + this.safeTop, '🚨 MEETING', {
-      fontSize: '14px', color: '#ff4444', backgroundColor: '#22000099',
-      padding: { x: 10, y: 8 }, fontFamily: 'Arial', align: 'center',
-    }).setScrollFactor(0).setDepth(101).setInteractive({ useHandCursor: true });
-    this.emergencyBtn.on('pointerdown', () => this.triggerEmergency(false));
+    // Uses the real "EMERGENCY" button art (Assets/Images/UI/emergency_icon.png)
+    // instead of a plain text label, matching the original game's HUD button.
+    this.emergencyBtn = this.buildImageButton(
+      EMERGENCY_BTN_W / 2 + 12, EMERGENCY_BTN_H / 2 + 56 + this.safeTop,
+      'ui_emergency_icon', EMERGENCY_BTN_W, EMERGENCY_BTN_H,
+      () => this.triggerEmergency(false),
+    );
 
     // Mini-map button (top-right) — shifted down by safe-area inset.
-    this.miniMapBtn = this.add.image(W - 48, 48 + this.safeTop, 'ui_map_button')
-      .setScrollFactor(0).setDepth(101).setDisplaySize(56, 56)
+    // Sized up slightly so it reads clearly as a tappable icon on mobile.
+    this.miniMapBtn = this.add.image(W - 52, 52 + this.safeTop, 'ui_map_button')
+      .setScrollFactor(0).setDepth(101).setDisplaySize(64, 64)
       .setInteractive({ useHandCursor: true });
     this.miniMapBtn.on('pointerdown', () => {
       this.sound.play('sfx_map_click', { volume: 0.5 });
@@ -385,15 +394,19 @@ export class GameScene extends Phaser.Scene {
     // ── Contextual action buttons — bottom-left, stacked vertically
     // (joystick moved to right, so actions live on the left).
     // Shifted up by safe-area bottom inset so they clear the home bar.
-    const actionX = 60;
+    // Sized and captioned to match the original game's large circular
+    // touch buttons (icon + caption). No dedicated "USE"/"REPORT" icon art
+    // exists in Assets/, so those two keep a drawn glyph; KILL uses the
+    // real Assets/Images/UI/kill_icon.png art like the original HUD.
+    const actionX = 68;
     const sb = this.safeBot;
-    this.killBtn = this.buildActionButton(actionX, H - 300 - sb, 46, 0xff2222, '🔪', () => this.attemptKill());
+    this.killBtn = this.buildImageButton(actionX, H - 320 - sb, 'ui_kill_icon', 76, 76, () => this.attemptKill());
     this.killBtn.setVisible(false);
 
-    this.reportBtn = this.buildActionButton(actionX, H - 180 - sb, 46, 0xff8888, '🚩', () => this.tryReport());
+    this.reportBtn = this.buildActionButton(actionX, H - 190 - sb, 58, 0xdddddd, '🚩', 'REPORT', () => this.tryReport());
     this.reportBtn.setVisible(false);
 
-    this.useBtn = this.buildActionButton(actionX, H - 60 - sb, 52, 0x88ff88, '✋', () => this.tryInteract());
+    this.useBtn = this.buildActionButton(actionX, H - 60 - sb, 64, 0xdddddd, '✋', 'USE', () => this.tryInteract());
     this.useBtn.setVisible(false);
 
     // Task list panel — left side, below emergency button
@@ -417,15 +430,18 @@ export class GameScene extends Phaser.Scene {
     const { width: W } = this.scale;
     const barY = 12 + this.safeTop;
     const cx = W / 2;
-    const cy = barY + 58;
+    const cy = barY + 68;
 
     this.taskArrow = this.add.container(cx, cy).setDepth(101);
 
-    const ring = this.add.circle(0, 0, 22, 0x000000, 0.55).setStrokeStyle(1.5, 0x99bbdd);
-    this.taskArrowIcon = this.add.triangle(0, 0, 0, -13, 10, 10, -10, 10, 0xffee22)
-      .setStrokeStyle(1.5, 0x664400);
-    this.taskArrowLabel = this.add.text(0, 30, '', {
-      fontSize: '11px', color: '#ffee22', fontFamily: 'Arial', fontStyle: 'bold',
+    // Sized up and thickened so the arrow reads clearly at a glance, like
+    // the bold directional chevron in the original game, instead of a small
+    // HUD glyph that gets lost against the map art.
+    const ring = this.add.circle(0, 0, 34, 0x000000, 0.5).setStrokeStyle(2, 0x99bbdd, 0.8);
+    this.taskArrowIcon = this.add.triangle(0, 0, 0, -22, 18, 17, -18, 17, 0xffee22)
+      .setStrokeStyle(2.5, 0x664400);
+    this.taskArrowLabel = this.add.text(0, 40, '', {
+      fontSize: '13px', color: '#ffee22', fontFamily: 'Arial', fontStyle: 'bold',
       stroke: '#000', strokeThickness: 3,
     }).setOrigin(0.5, 0);
 
@@ -458,16 +474,18 @@ export class GameScene extends Phaser.Scene {
    */
   private buildTaskListInHud() {
     const listX  = 10;
-    const listY  = 108 + this.safeTop;   // below the 🚨 MEETING button
-    const listW  = 160;
-    const rowH   = 19;
+    // Below the EMERGENCY button, which now uses full-size button art
+    // (EMERGENCY_BTN_H tall) instead of a slim text label.
+    const listY  = EMERGENCY_BTN_H + 66 + this.safeTop;
+    const listW  = 190;
+    const rowH   = 24;
     const numRows = this.tasks.length;
-    const totalH  = 18 + numRows * rowH + 4;
+    const totalH  = 24 + numRows * rowH + 6;
 
     const bg = this.add.rectangle(listX + listW / 2, listY + totalH / 2, listW, totalH, 0x000000, 0.60)
       .setStrokeStyle(1, 0x334466);
-    const hdr = this.add.text(listX + 6, listY + 3, 'TASKS', {
-      fontSize: '11px', color: '#99bbdd', fontStyle: 'bold', fontFamily: 'Arial',
+    const hdr = this.add.text(listX + 8, listY + 5, 'TASKS', {
+      fontSize: '14px', color: '#99bbdd', fontStyle: 'bold', fontFamily: 'Arial',
       stroke: '#000', strokeThickness: 2,
     });
     this.hud.add([bg, hdr]);
@@ -476,9 +494,9 @@ export class GameScene extends Phaser.Scene {
     for (let i = 0; i < this.tasks.length; i++) {
       const task = this.tasks[i];
       const label = SHORT_TASK_NAMES[task.type] ?? task.title.slice(0, 14);
-      const rowY = listY + 18 + i * rowH;
-      const t = this.add.text(listX + 6, rowY, `\u25a1 ${label}`, {
-        fontSize: '11px', color: '#aaaaaa', fontFamily: 'Arial',
+      const rowY = listY + 24 + i * rowH;
+      const t = this.add.text(listX + 8, rowY, `\u25a1 ${label}`, {
+        fontSize: '14px', color: '#aaaaaa', fontFamily: 'Arial',
         stroke: '#000', strokeThickness: 2,
       });
       this.taskListRows.push(t);
@@ -523,18 +541,46 @@ export class GameScene extends Phaser.Scene {
     this.uiCamera.ignore(this.children.list.filter((o) => !hudSet.has(o)));
   }
 
-  /** A large circular touch button used for the bottom-right action stack. */
+  /**
+   * A large circular touch button used for the action stack, styled after
+   * the original game's translucent grey action buttons: dark glass circle,
+   * light rim, glyph, and a caption underneath. Used for REPORT/USE, which
+   * have no dedicated icon art in Assets/ (only KILL and EMERGENCY do).
+   */
   private buildActionButton(
-    x: number, y: number, radius: number, color: number, label: string, onTap: () => void,
+    x: number, y: number, radius: number, rimColor: number, label: string, caption: string, onTap: () => void,
   ): Phaser.GameObjects.Container {
-    const circle = this.add.arc(0, 0, radius, 0, 360, false, 0x000000, 0.55)
-      .setStrokeStyle(2, color, 0.9);
-    const icon = this.add.text(0, 0, label, { fontSize: `${Math.round(radius * 0.9)}px` }).setOrigin(0.5);
+    const circle = this.add.arc(0, 0, radius, 0, 360, false, 0x000000, 0.5)
+      .setStrokeStyle(2.5, rimColor, 0.9);
+    const icon = this.add.text(0, -6, label, { fontSize: `${Math.round(radius * 0.8)}px` }).setOrigin(0.5);
+    const cap = this.add.text(0, radius + 10, caption, {
+      fontSize: '13px', color: '#eeeeee', fontFamily: 'Arial', fontStyle: 'bold',
+      stroke: '#000', strokeThickness: 3,
+    }).setOrigin(0.5);
     const hitArea = new Phaser.Geom.Circle(0, 0, radius);
-    const container = this.add.container(x, y, [circle, icon])
+    const container = this.add.container(x, y, [circle, icon, cap])
       .setScrollFactor(0).setDepth(101)
       .setSize(radius * 2, radius * 2)
       .setInteractive(hitArea, Phaser.Geom.Circle.Contains);
+    container.on('pointerdown', onTap);
+    return container;
+  }
+
+  /**
+   * A HUD button backed by real button art from Assets/ (e.g. kill_icon.png,
+   * emergency_icon.png) instead of a drawn shape + emoji. `w`/`h` are the
+   * on-screen display size; the source aspect ratio is preserved via
+   * fitContain so the art isn't stretched.
+   */
+  private buildImageButton(
+    x: number, y: number, textureKey: string, w: number, h: number, onTap: () => void,
+  ): Phaser.GameObjects.Container {
+    const img = fitContain(this.add.image(0, 0, textureKey), w, h);
+    const hitArea = new Phaser.Geom.Rectangle(-w / 2, -h / 2, w, h);
+    const container = this.add.container(x, y, [img])
+      .setScrollFactor(0).setDepth(101)
+      .setSize(w, h)
+      .setInteractive(hitArea, Phaser.Geom.Rectangle.Contains);
     container.on('pointerdown', onTap);
     return container;
   }
@@ -601,10 +647,10 @@ export class GameScene extends Phaser.Scene {
    */
   private handleActionButtonTap(px: number, py: number) {
     if (!this.player.isAlive || this.gameOver) return;
-    const W = this.scale.width, H = this.scale.height;
-    const actionX = 60;   // mirrored to left side with joystick on right
+    const H = this.scale.height;
+    const actionX = 68;   // mirrored to left side with joystick on right
     const sb = this.safeBot;
-    const tapR = 68; // generous finger radius
+    const tapR = 76; // generous finger radius, matches the enlarged buttons
 
     if (this.useBtn.visible) {
       const uy = H - 60 - sb;
@@ -614,22 +660,22 @@ export class GameScene extends Phaser.Scene {
       }
     }
     if (this.reportBtn.visible) {
-      const ry = H - 180 - sb;
+      const ry = H - 190 - sb;
       if (Phaser.Math.Distance.Between(px, py, actionX, ry) < tapR) {
         this.tryReport();
         return;
       }
     }
     if (this.killBtn.visible) {
-      const ky = H - 300 - sb;
+      const ky = H - 320 - sb;
       if (Phaser.Math.Distance.Between(px, py, actionX, ky) < tapR) {
         this.attemptKill();
         return;
       }
     }
     // Top-left: emergency button fallback
-    const emergBtnY = 64 + this.safeTop + 20; // approximate center of button
-    if (px < 160 && py < emergBtnY + 40 && py > 40) {
+    const emergBtnX = EMERGENCY_BTN_W / 2 + 12, emergBtnY = EMERGENCY_BTN_H / 2 + 56 + this.safeTop;
+    if (Phaser.Math.Distance.Between(px, py, emergBtnX, emergBtnY) < Math.max(EMERGENCY_BTN_W, EMERGENCY_BTN_H) / 2) {
       this.triggerEmergency(false);
     }
   }
