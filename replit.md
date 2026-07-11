@@ -67,3 +67,9 @@ Complete **8 tasks** before the impostor bot kills enough crewmates to win.
 - Target Telegram HTML5 Mini App (touch + keyboard)
 - Preserve all original game logic, visuals, and assets exactly
 - Single entry point (`index.html`), TypeScript modules via Vite
+
+## Project setup notes
+
+- This repo also contains the original Python/Pygame source (`main.py`, `board.py`, `server.py`, etc.) kept for reference — the active, maintained version is the TypeScript/Phaser web port under `src/`.
+- Workflow "Start application" runs `npm run dev` (Vite on port 5000) and is confirmed working.
+- A follow-up task has been proposed to adapt the game for mobile portrait orientation and Telegram Mini App integration (virtual controls, responsive scaling, safe areas) — see project tasks.
