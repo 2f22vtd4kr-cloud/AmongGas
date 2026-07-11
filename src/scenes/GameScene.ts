@@ -265,7 +265,6 @@ export class GameScene extends Phaser.Scene {
       emergency_btn:         'emergency_button',
       wifi:                  'wifi',
       reactor_btn:           'reactor_btn',
-      security_room_comp:    'security_monitor',
       admin_btn1:            'admin_control1',
       admin_btn2:            'admin_control2',
       garbage_liver:         'garbage_liver',

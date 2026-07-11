@@ -87,11 +87,7 @@ export class Bot extends Phaser.Physics.Arcade.Sprite {
 
     const animKey = `${this.colorKey}_walk_${this.direction}`;
     if (this.anims.currentAnim?.key !== animKey) {
-      // Guard: only play if the animation was actually created (some color
-      // variants only have 1 sprite frame and silently fail otherwise).
-      if (this.scene.anims.exists(animKey)) {
-        this.anims.play(animKey, true);
-      }
+      this.anims.play(animKey, true);
     }
 
     // Y-scale bob — gives walking feedback for single-frame (BASIC_COLOR)
