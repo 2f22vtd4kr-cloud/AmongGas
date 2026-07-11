@@ -36,16 +36,15 @@ export class PreloadScene extends Phaser.Scene {
       this.load.image(`help_${i}`, `Assets/Images/help/help${i}.png`);
     }
 
-    // ── Menu audio — must load here so MenuScene works on first visit ─
-    // UI click sounds (~1.2 MB total)
+    // ── Menu audio — UI click sounds only (~1.2 MB, fast on mobile) ─
+    // Music (9.7 MB) is lazy-loaded in MenuScene.create() so the menu
+    // appears immediately without a long initial wait on slow connections.
     this.load.audio('sfx_menu_sel',  'Assets/Sounds/UI/select.wav');
     this.load.audio('sfx_go_back',   'Assets/Sounds/UI/back2.wav');
     this.load.audio('sfx_selected',  'Assets/Sounds/UI/selected2.wav');
     this.load.audio('sfx_keypress',  'Assets/Sounds/UI/keypress.wav');
     this.load.audio('sfx_backspace', 'Assets/Sounds/UI/backspace.wav');
     this.load.audio('sfx_map_click', 'Assets/Sounds/UI/map_btn_click.wav');
-    // Menu music (~9.7 MB) — needed immediately when MenuScene starts
-    this.load.audio('sfx_menu_music', 'Assets/Sounds/Background/main_menu_music.mp3');
   }
 
   create() {

@@ -71,11 +71,32 @@ export class MenuScene extends Phaser.Scene {
     keys.on('keydown-ENTER', () => this.selectMainItem(this.cursorIdx));
     keys.on('keydown-SPACE', () => this.selectMainItem(this.cursorIdx));
 
-    // Music — guard against key being absent (should be loaded by PreloadScene)
-    if (this.cache.audio.exists('sfx_menu_music') && !this.sound.get('sfx_menu_music')?.isPlaying) {
-      this.music = this.sound.add('sfx_menu_music', { loop: true, volume: 0.5 });
-      this.music.play();
+    // Music — lazy-loaded (9.7 MB) so the menu appears immediately.
+    // If already cached (e.g. returning from a game), play right away.
+    // Otherwise start a background load and play when ready.
+    this.startMenuMusic();
+  }
+
+  private startMenuMusic() {
+    // Already in cache (e.g. returning from a game round) — play immediately
+    if (this.cache.audio.exists('sfx_menu_music')) {
+      if (!this.sound.get('sfx_menu_music')?.isPlaying) {
+        this.music = this.sound.add('sfx_menu_music', { loop: true, volume: 0.5 });
+        this.music.play();
+      }
+      return;
     }
+    // Not yet cached — load in background, play when ready (no progress bar shown)
+    this.load.audio('sfx_menu_music', 'Assets/Sounds/Background/main_menu_music.mp3');
+    this.load.once('complete', () => {
+      // Scene may have changed by the time music loads — guard against it
+      if (!this.scene.isActive('MenuScene')) return;
+      if (this.cache.audio.exists('sfx_menu_music') && !this.sound.get('sfx_menu_music')?.isPlaying) {
+        this.music = this.sound.add('sfx_menu_music', { loop: true, volume: 0.5 });
+        this.music.play();
+      }
+    });
+    this.load.start();
   }
 
   private navigate(dir: -1 | 1) {

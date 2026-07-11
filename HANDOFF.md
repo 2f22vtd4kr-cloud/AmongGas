@@ -122,6 +122,17 @@ At the **end of every session**, add a new block under "What was worked on":
 
 **What was done**: …
 **Files changed**: …
+### Session 2b (2026-07-11) — Removed menu music from initial preload (mobile fix)
+
+**Problem**: After session 2's fix, mobile users still saw the stuck loading screen.  
+**Root cause**: `sfx_menu_music` (9.7 MB MP3) was added to `PreloadScene.preload()`, making the initial page load ~11 MB. On LTE that takes 15–30 s, so the loading bar appeared stuck at 0%.
+
+**Fix**:
+- Removed `sfx_menu_music` from `PreloadScene` — initial preload is now only ~1.2 MB (6 small UI click sounds + menu images).
+- Added `MenuScene.startMenuMusic()`: if the music key is already cached (return-from-game), plays immediately; otherwise starts a **background** `this.load.start()` in MenuScene after the menu is already visible, playing when the 9.7 MB file finishes downloading silently.
+
+**Files changed**: `src/scenes/PreloadScene.ts`, `src/scenes/MenuScene.ts`
+
 **NOT yet done / open issues**: …
 ```
 
