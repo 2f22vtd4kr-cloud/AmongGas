@@ -72,7 +72,7 @@ Browser loads index.html
 ## 5. Known Permanent Gaps (files do not exist in Assets/)
 
 - `victory_crew.wav` and `victory_impostor.wav` — loaded in `GamePreloadScene` as `sfx_victory_crew` / `sfx_victory_imp` but the files are absent. Phaser will 404 silently; no crash. No replacement available.
-- Dead body sprites — `Player.die()` and `Bot.die()` call `setTexture('dead_blue')` etc. but files are named `Deadblue.png`. Players look alive when dead. See Task #3.
+- Red player visor renders green (same copy-paste asset bug family as the shading band fixed in an earlier session). Cosmetic only; needs a separate recolor pass on the Red assets if addressed.
 
 ---
 
@@ -171,7 +171,19 @@ Browser loads index.html
 - **Bot Y-bob for single-frame colors**: BASIC_COLOR bots (Black/Brown/Pink/Purple/White) still have only 1 sprite frame. When moving, they now get a subtle 5% vertical scale squeeze at ~4 Hz using `Math.sin(bobTimer * 0.025 + bobPhase)`. Each bot has a random `bobPhase` so they don't all pulse in sync. Scale resets to (1, 1) when still or when a full animation is active.
 - **Security monitor prop removed from world**: `security_room_comp` was mapped to `security_monitor.png`, which is a rendered image of a security-camera room view — it produced a "room inside a room" visual artifact in the security room corner. Removed the key from `placeItemSprites` imgMap. Task proximity detection is unaffected (it uses TMX coordinates, not sprites).
 
+### Session 8 (2026-07-11)
+- **Dead body invisible after kill (fixed)**: root cause was Phaser's animation manager continuing to advance the active walk animation every tick even after `setTexture('dead_...')`, silently overriding the dead frame. Fixed by calling `this.anims.stop()` immediately before `setTexture()` in both `Bot.die()` and `Player.die()`. (The `Deadblue.png`-vs-`dead_blue` filename mismatch noted in §5 from earlier sessions had already been resolved by Session 4's asset-loading rewrite — this was a distinct, newer bug.)
+- **Task mini-game panels squished (fixed)**: all 6 remaining task scenes (`FixWiringScene`, `StabilizeNavScene`, `FuelEngineScene`, `AlignEngineScene`, `EmptyGarbageScene`, plus `RebootWifiScene`) switched from `setDisplaySize(w,h)` (stretches to fit box, distorting aspect ratio) to `fitContain(img, maxW, maxH)` (`src/utils/imageFit.ts`, letterboxes instead of stretching). `RebootWifiScene` panel height also increased from `H×0.52` (max 520) to `H−100` (max 720) because its background art (`panel_wifi_bg.png`) is portrait-oriented (366×716) and was being crushed into a near-square box.
+- **WiFi/Wiring task glow after completion (fixed)**: `GameScene.placeItemSprites()` now tracks each task's world sprite in a `taskSprites: Map<objectName, Image>`. New `updateTaskSprites()` (called every frame from `detectNearby()`) swaps each tracked sprite's texture between base / `_highlight` (player nearby, task incomplete) / `_connected` (task done) variants, driven by a `TASK_SPRITE_VARIANTS` lookup table. `completeTask()` also force-swaps to the connected texture immediately so there's no one-frame lag. Currently wired for `wifi` and `electricity_wires` (the only objects with highlight/connected art); `nav` only has a highlight variant.
+- **Task list HUD added**: persistent left-side panel (`buildTaskListInHud()`, added to `this.hud` so it renders on the unzoomed UI camera) lists all tasks by short name (`SHORT_TASK_NAMES` map) with ☐ / ✓ state, updated from `completeTask()` via `updateTaskList()`.
+- **Minimap task markers added**: `toggleMiniMap()` now overlays a pulsing yellow "!" (Phaser tween, scale 1↔1.25) over every incomplete task's location, using the same world→map coordinate transform as the player dot. Duplicate task locations (e.g. two tasks mapped to the same `wifi` object) are deduped by rounded world position so markers don't stack. Tweens are explicitly killed in `closeMiniMap()` via `this.tweens.killTweensOf(this.miniMapOverlay.list)` to avoid orphaned tweens targeting destroyed objects.
+- **Directional task compass added**: new HUD element (`buildTaskCompass()`) below the task bar — a yellow triangle arrow inside a ring that rotates every frame (`updateTaskArrow()`, called from `update()`) to point from the player toward the "tracked" task, with the task's short name labeled underneath. Tracked task = `getTrackedTask()`: the manually selected task (tap a row in the task list — each row got an invisible larger hit-rectangle for mobile) if still incomplete, else the first incomplete task in list order. Arrow hides entirely once all tasks are done. Rotation math: Phaser's `Angle.Between` returns 0°=right/90°=down (y-down, atan2 convention); the triangle's built-in "up" orientation corresponds to −90° in that convention, so `icon.rotation = angle + Math.PI/2`.
+- Together these four changes replicate the original Among Us navigation loop end-to-end: task list → map markers → arrow guidance → walk in and press Use.
+- TypeScript check: clean (`tsc --noEmit` passes) after every change in this session; workflow restarted and screenshot-verified (compass rotation, minimap markers, task list highlight all visually confirmed).
+
 ### Next Session Priorities
 1. Consider lazy-loading ambient sounds per room (31 MB currently omitted)
 2. Wire up Telegram user identity (pre-fill player name from `initDataUnsafe.user.first_name`)
 3. Test multiplayer (LOCAL) path
+4. Fix red player visor rendering green (see §5)
+5. Extend `TASK_SPRITE_VARIANTS` highlight/connected treatment to other task objects if more art becomes available (currently only wifi + electricity_wires have both variants; nav has highlight only)
