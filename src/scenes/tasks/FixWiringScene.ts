@@ -161,7 +161,7 @@ export class FixWiringScene extends Phaser.Scene {
   }
 
   private closeTask() {
-    this.scene.stop();
     this.scene.resume('GameScene');
+    this.scene.stop();
   }
 }

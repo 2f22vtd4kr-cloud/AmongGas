@@ -23,7 +23,13 @@ export class StabilizeNavScene extends Phaser.Scene {
 
     const pw = 460, ph = 400;
     const px = (W-pw)/2, py = (H-ph)/2;
-    this.add.rectangle(W/2, H/2, pw, ph, 0x0a1628).setStrokeStyle(2, 0x0044ff);
+
+    // Panel background from original asset
+    if (this.textures.exists('task_nav_base')) {
+      this.add.image(W/2, H/2, 'task_nav_base').setDisplaySize(pw, ph);
+    } else {
+      this.add.rectangle(W/2, H/2, pw, ph, 0x0a1628).setStrokeStyle(2, 0x0044ff);
+    }
 
     this.add.text(W/2, py+16, "Stabilize The Ship's Navigation", {
       fontSize: '18px', color: '#88aaff', fontFamily: 'Arial',
@@ -34,10 +40,15 @@ export class StabilizeNavScene extends Phaser.Scene {
     }).setOrigin(1,0).setInteractive();
     closeBtn.on('pointerdown', () => this.closeTask());
 
-    // Target crosshair (random position)
+    // Target crosshair (random position within safe area)
     const area = { x: px+80, y: py+80, w: pw-160, h: ph-160 };
     this.targetX = area.x + Math.random() * area.w;
     this.targetY = area.y + Math.random() * area.h;
+
+    // Target center image (overlaid on top of graphics crosshair)
+    if (this.textures.exists('task_nav_center')) {
+      this.add.image(this.targetX, this.targetY, 'task_nav_center').setDisplaySize(44, 44).setAlpha(0.9);
+    }
 
     // Joystick starts at center
     this.joystickX = W/2;
@@ -110,5 +121,5 @@ export class StabilizeNavScene extends Phaser.Scene {
     });
   }
 
-  private closeTask() { this.scene.stop(); this.scene.resume('GameScene'); }
+  private closeTask() { this.scene.resume('GameScene'); this.scene.stop(); }
 }

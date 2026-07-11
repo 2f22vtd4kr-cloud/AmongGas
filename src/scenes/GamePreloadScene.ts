@@ -158,11 +158,29 @@ export class GamePreloadScene extends Phaser.Scene {
       this.load.image(`task_reactor_${n}`, `Assets/Images/Tasks/Start Reactor/reactor_${n}.png`);
     }
     this.load.image('task_reactor_close','Assets/Images/Tasks/Start Reactor/close.PNG');
-    this.load.image('task_align_close',  'Assets/Images/Tasks/Align Engine Output/close.PNG');
-    this.load.image('task_garbage_close','Assets/Images/Tasks/Empty Garbage/close.PNG');
-    this.load.image('task_asteroids_ship', 'Assets/Images/Tasks/Clear Asteroids/starship.png');
-    this.load.image('task_asteroids_ship2','Assets/Images/Tasks/Clear Asteroids/starship2.png');
-    this.load.image('task_asteroids_ship3','Assets/Images/Tasks/Clear Asteroids/starship3.png');
+    this.load.image('task_align_close',    'Assets/Images/Tasks/Align Engine Output/close.PNG');
+    this.load.image('task_align_base',     'Assets/Images/Tasks/Align Engine Output/engineAlign_base.png');
+    this.load.image('task_align_liver',    'Assets/Images/Tasks/Align Engine Output/engine_liver.png');
+    this.load.image('task_align_position', 'Assets/Images/Tasks/Align Engine Output/alignment_position.png');
+
+    this.load.image('task_garbage_close',      'Assets/Images/Tasks/Empty Garbage/close.PNG');
+    this.load.image('task_garbage_full',       'Assets/Images/Tasks/Empty Garbage/garbage_base_full.PNG');
+    this.load.image('task_garbage_empty',      'Assets/Images/Tasks/Empty Garbage/garbage_base_empty.PNG');
+    this.load.image('task_garbage_liver_up',   'Assets/Images/Tasks/Empty Garbage/liver_up.PNG');
+    this.load.image('task_garbage_liver_down', 'Assets/Images/Tasks/Empty Garbage/liver_down.PNG');
+    this.load.image('task_garbage_gb2',        'Assets/Images/Tasks/Empty Garbage/gb2.png');
+    this.load.image('task_garbage_gb3',        'Assets/Images/Tasks/Empty Garbage/gb3.png');
+    this.load.image('task_garbage_gb4',        'Assets/Images/Tasks/Empty Garbage/gb4.png');
+
+    this.load.image('task_asteroids_ship',  'Assets/Images/Tasks/Clear Asteroids/starship.png');
+    this.load.image('task_asteroids_ship2', 'Assets/Images/Tasks/Clear Asteroids/starship2.png');
+    this.load.image('task_asteroids_ship3', 'Assets/Images/Tasks/Clear Asteroids/starship3.png');
+    this.load.image('task_space_bg',        'Assets/Images/Tasks/Clear Asteroids/space.jpg');
+    this.load.image('task_asteroid_1',      'Assets/Images/Tasks/Clear Asteroids/asteroid1.png');
+    this.load.image('task_asteroid_2',      'Assets/Images/Tasks/Clear Asteroids/asteroid2.png');
+    this.load.image('task_asteroid_3',      'Assets/Images/Tasks/Clear Asteroids/asteroid3.png');
+    this.load.image('task_asteroid_4',      'Assets/Images/Tasks/Clear Asteroids/asteroid4.png');
+    this.load.image('task_laser',           'Assets/Images/Tasks/Clear Asteroids/laser.png');
 
     // ── Environment ──────────────────────────────────────────────
     this.load.image('light_mask', 'Assets/Images/Environment/light_350_med.png');

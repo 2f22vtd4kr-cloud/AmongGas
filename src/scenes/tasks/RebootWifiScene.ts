@@ -80,5 +80,5 @@ export class RebootWifiScene extends Phaser.Scene {
     this.time.delayedCall(1200, () => { this.gameScene.completeTask(this.taskId); this.scene.stop(); });
   }
 
-  private closeTask() { this.scene.stop(); this.scene.resume('GameScene'); }
+  private closeTask() { this.scene.resume('GameScene'); this.scene.stop(); }
 }

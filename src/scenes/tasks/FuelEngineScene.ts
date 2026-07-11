@@ -30,13 +30,18 @@ export class FuelEngineScene extends Phaser.Scene {
     }).setOrigin(1,0).setInteractive();
     closeBtn.on('pointerdown', () => this.closeTask());
 
+    // Panel background from original asset — depth -1 so interactive elements stay on top
+    if (this.textures.exists('task_fuel_base')) {
+      this.add.image(W/2, H/2, 'task_fuel_base').setDisplaySize(pw-20, ph-20).setDepth(-1);
+    }
+
     // Tank outline
     const tankX = W/2;
     const tankTop = py+80, tankBot = py+ph-80;
     const tankH = tankBot - tankTop;
     const tankW = 100;
 
-    this.add.rectangle(tankX, tankTop + tankH/2, tankW, tankH, 0x222233).setStrokeStyle(2, 0x666688);
+    this.add.rectangle(tankX, tankTop + tankH/2, tankW, tankH, 0x222233, 0.5).setStrokeStyle(2, 0x666688);
 
     // Fuel fill bar
     this.fuelBar = this.add.rectangle(tankX, tankBot, tankW-6, 0, 0xff8800).setOrigin(0.5, 1);
@@ -101,5 +106,5 @@ export class FuelEngineScene extends Phaser.Scene {
     this.time.delayedCall(1200, () => { this.gameScene.completeTask(this.taskId); this.scene.stop(); });
   }
 
-  private closeTask() { this.scene.stop(); this.scene.resume('GameScene'); }
+  private closeTask() { this.scene.resume('GameScene'); this.scene.stop(); }
 }

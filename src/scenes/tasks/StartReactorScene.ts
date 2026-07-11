@@ -31,6 +31,11 @@ export class StartReactorScene extends Phaser.Scene {
     }).setOrigin(1,0).setInteractive();
     closeBtn.on('pointerdown', () => this.closeTask());
 
+    // Panel background from original asset — depth -1 so text/buttons stay on top
+    if (this.textures.exists('task_reactor_base1')) {
+      this.add.image(W/2, H/2, 'task_reactor_base1').setDisplaySize(pw, ph).setDepth(-1);
+    }
+
     // 3×2 grid of buttons
     const cols = 3, rows = 2;
     const bw = 80, bh = 70, gap = 14;
@@ -101,5 +106,5 @@ export class StartReactorScene extends Phaser.Scene {
     this.time.delayedCall(1200, () => { this.gameScene.completeTask(this.taskId); this.scene.stop(); });
   }
 
-  private closeTask() { this.scene.stop(); this.scene.resume('GameScene'); }
+  private closeTask() { this.scene.resume('GameScene'); this.scene.stop(); }
 }
