@@ -4,4 +4,4 @@
 - [Among Us known pre-existing bugs](among-us-known-bugs.md) — red visor green, anims.stop() required before setTexture in die().
 - [Among Us UI asset inventory](among-us-ui-asset-inventory.md) — which HUD icons exist as real art in Assets/ vs which (USE/REPORT/settings/chat) have none; never fabricate the missing ones.
 - [Screen-edge compass arrow](phaser-edge-hugging-compass.md) — ray-cast from screen centre toward target, clip to an inset rect, for a 360° HUD direction indicator (Among Us task arrow); also covers the on-screen "hover near target" mode.
-- [Phaser letterbox/pillarbox bars](phaser-letterbox-fix.md) — a fixed "design resolution" (e.g. 750x1334) under Scale.FIT causes black bars on any device whose aspect ratio differs; size the game to the real viewport instead.
+- [Phaser letterbox/pillarbox bars](phaser-letterbox-fix.md) — non-uniform CSS stretch or cover-cropping to kill FIT's black bars both break HUDs anchored near edges; keep FIT and blend the bars into the bg instead.
