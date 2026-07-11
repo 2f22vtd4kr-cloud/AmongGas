@@ -3,7 +3,7 @@
  *
  * Sprite strategy: load actual artwork from Assets/ for every color.
  *
- *   Full animation colors (18 walk frames + ghost): Red, Blue, Green, Orange, Yellow
+ *   Full animation colors (18 down / 17 up,left,right walk frames + ghost): Red, Blue, Green, Orange, Yellow
  *   Single-frame colors (1 walk frame, no ghost):   Black, Brown, Pink, Purple, White
  *
  * Texture key conventions (same as the rest of the codebase):
@@ -15,6 +15,15 @@ import Phaser from 'phaser';
 import { fixRedSprite } from '../utils/SpriteRecolor';
 
 const WALK_DIRS = ['down', 'left', 'right', 'up'] as const;
+
+/**
+ * Number of walk frames available per direction for FULL_COLORS.
+ * The "down" walk cycle has 18 frames; "up"/"left"/"right" only have 17 —
+ * this is how the source artwork is laid out, not a missing-asset bug.
+ */
+const FRAME_COUNT: Record<typeof WALK_DIRS[number], number> = {
+  down: 18, left: 17, right: 17, up: 17,
+};
 
 /** Colors that have 18 walk frames and ghost sprites in Assets/. */
 const FULL_COLORS  = ['red', 'blue', 'green', 'orange', 'yellow'] as const;
@@ -42,7 +51,7 @@ export class GamePreloadScene extends Phaser.Scene {
     const keysToEvict: string[] = [];
     for (const lc of FULL_COLORS) {
       for (const dir of WALK_DIRS) {
-        for (let f = 1; f <= 18; f++) keysToEvict.push(`${lc}_${dir}_${f}`);
+        for (let f = 1; f <= FRAME_COUNT[dir]; f++) keysToEvict.push(`${lc}_${dir}_${f}`);
       }
       keysToEvict.push(`${lc}_ghost_1`, `${lc}_ghost_2`);
     }
@@ -83,7 +92,7 @@ export class GamePreloadScene extends Phaser.Scene {
     for (const lc of FULL_COLORS) {
       const C = cap(lc);
       for (const dir of WALK_DIRS) {
-        for (let f = 1; f <= 18; f++) {
+        for (let f = 1; f <= FRAME_COUNT[dir]; f++) {
           this.load.image(
             `${lc}_${dir}_${f}`,
             `Assets/Images/Player/${C}/${lc}_${dir}_walk/step${f}.png`,
@@ -248,7 +257,7 @@ export class GamePreloadScene extends Phaser.Scene {
     // like the rest of the cast: solid red body + white/grey visor.
     const RED_WALK_KEYS: string[] = [];
     for (const dir of WALK_DIRS) {
-      for (let f = 1; f <= 18; f++) RED_WALK_KEYS.push(`red_${dir}_${f}`);
+      for (let f = 1; f <= FRAME_COUNT[dir]; f++) RED_WALK_KEYS.push(`red_${dir}_${f}`);
     }
     RED_WALK_KEYS.push('red_ghost_1', 'red_ghost_2', 'dead_red');
 
@@ -265,7 +274,7 @@ export class GamePreloadScene extends Phaser.Scene {
     for (const lc of FULL_COLORS) {
       for (const dir of WALK_DIRS) {
         const frames = [];
-        for (let f = 1; f <= 18; f++) {
+        for (let f = 1; f <= FRAME_COUNT[dir]; f++) {
           const key = `${lc}_${dir}_${f}`;
           if (this.textures.exists(key)) frames.push({ key });
         }
