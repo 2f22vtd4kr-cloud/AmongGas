@@ -4,6 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
   <meta name="theme-color" content="#000000" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <title>Among Gas</title>
   <!-- Telegram Mini App SDK -->
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
@@ -13,14 +15,14 @@
       width: 100%;
       height: 100%;
       overflow: hidden;
-      /* Space-themed backdrop (matches the Phaser config's own
-         backgroundColor and the loading screen) so that whatever sliver of
-         page shows around the letterboxed/pillarboxed canvas blends with
-         the game's own palette instead of looking like a broken black
-         stripe. See the #game-container comment below for why we keep
-         Phaser's own uniform FIT scaling instead of stretching the canvas
-         with CSS. */
-      background: radial-gradient(ellipse at 50% 30%, #241143 0%, #140826 55%, #0a0416 100%);
+      /* background-color is set explicitly so iOS Safari picks it up for
+         the top/bottom browser chrome strips (Safari ignores theme-color
+         and uses the computed background-color instead). We use
+         background-image for the gradient — NOT the background shorthand —
+         because the shorthand resets background-color to transparent,
+         which would make Safari show white chrome again. */
+      background-color: #000000;
+      background-image: radial-gradient(ellipse at 50% 30%, #241143 0%, #140826 55%, #0a0416 100%);
       touch-action: none;
     }
     /* We deliberately do NOT force the canvas to 100%/100% here. Every HUD
