@@ -279,7 +279,10 @@ export class GameScene extends Phaser.Scene {
       if (key && this.textures.exists(key)) {
         const sp = this.add.image(obj.x + obj.width / 2, obj.y + obj.height / 2, key);
         sp.setDepth(5);
-        sp.setDisplaySize(obj.width || 64, obj.height || 48);
+        // fitContain preserves the texture's native aspect ratio instead of
+        // squishing it to match the TMX bounding box (which caused laptop art
+        // to appear stretched when width/height proportions differed).
+        fitContain(sp, obj.width || 64, obj.height || 48);
       }
     }
   }
@@ -391,16 +394,21 @@ export class GameScene extends Phaser.Scene {
       .setScrollFactor(0).setDepth(103);
 
     this.input.on('pointerdown', (p: Phaser.Input.Pointer) => {
-      // Only claim taps in the bottom-left movement zone so this doesn't
-      // steal touches meant for the emergency button (top-left) or the
-      // action button stack (bottom-right).
-      const inMovementZone = p.x < this.scale.width * 0.55 && p.y > this.scale.height * 0.35;
+      const W = this.scale.width, H = this.scale.height;
+      // Bottom-left zone → joystick
+      const inMovementZone = p.x < W * 0.55 && p.y > H * 0.35;
       if (inMovementZone) {
         this.joystickActive = true;
         this.joystickStart = { x: p.x, y: p.y };
         this.joystickBase?.setPosition(p.x, p.y);
         this.joystickThumb?.setPosition(p.x, p.y);
+        return;
       }
+      // Right-side action buttons — fallback zone detection.
+      // Container.setInteractive() can silently fail on iOS when a secondary
+      // camera (uiCamera) is the rendering camera, so we duplicate the hit
+      // detection here using the same coordinates used in buildHUD().
+      this.handleActionButtonTap(p.x, p.y);
     });
     this.input.on('pointermove', (p: Phaser.Input.Pointer) => {
       if (!this.joystickActive) return;
@@ -425,6 +433,47 @@ export class GameScene extends Phaser.Scene {
         this.joystickThumb?.setPosition(this.joystickBase.x, this.joystickBase.y);
       }
     });
+  }
+
+  /**
+   * Manual fallback touch-zone check for the three right-side action buttons.
+   * Called from the global `pointerdown` handler so that button taps are
+   * always caught even if Container.setInteractive() misfires on iOS.
+   * Mirrors the positions in buildHUD() exactly.
+   */
+  private handleActionButtonTap(px: number, py: number) {
+    if (!this.player.isAlive || this.gameOver) return;
+    const W = this.scale.width, H = this.scale.height;
+    const actionX = W - 60;
+    const sb = this.safeBot;
+    const tapR = 68; // generous finger radius
+
+    if (this.useBtn.visible) {
+      const uy = H - 60 - sb;
+      if (Phaser.Math.Distance.Between(px, py, actionX, uy) < tapR) {
+        this.tryInteract();
+        return;
+      }
+    }
+    if (this.reportBtn.visible) {
+      const ry = H - 180 - sb;
+      if (Phaser.Math.Distance.Between(px, py, actionX, ry) < tapR) {
+        this.tryReport();
+        return;
+      }
+    }
+    if (this.killBtn.visible) {
+      const ky = H - 300 - sb;
+      if (Phaser.Math.Distance.Between(px, py, actionX, ky) < tapR) {
+        this.attemptKill();
+        return;
+      }
+    }
+    // Top-left: emergency button fallback
+    const emergBtnY = 64 + this.safeTop + 20; // approximate center of button
+    if (px < 160 && py < emergBtnY + 40 && py > 40) {
+      this.triggerEmergency(false);
+    }
   }
 
   // ────────────────── Update loop ──────────────────
@@ -728,21 +777,44 @@ export class GameScene extends Phaser.Scene {
     if (this.miniMapOverlay) { this.closeMiniMap(); return; }
     const { width: W, height: H } = this.scale;
     this.miniMapOverlay = this.add.container(W / 2, H / 2).setScrollFactor(0).setDepth(300);
-    const bg = this.add.rectangle(0, 0, W * 0.85, H * 0.85, 0x000000, 0.92);
-    const mapImg = fitContain(this.add.image(0, 0, 'minimap'), W * 0.8, H * 0.8);
 
-    // Player dot
-    const px = (this.player.x / WORLD_WIDTH) * (W * 0.8) - W * 0.4;
-    const py = (this.player.y / WORLD_HEIGHT) * (H * 0.8) - H * 0.4;
-    const dot = this.add.arc(px, py, 6, 0, 360, false, 0x00ff88);
+    // Bigger overlay: nearly full-screen so the map is readable on phone
+    const bg = this.add.rectangle(0, 0, W * 0.96, H * 0.96, 0x000000, 0.95);
+    const mapImg = fitContain(this.add.image(0, 0, 'minimap'), W * 0.9, H * 0.86);
 
-    const closeBtn = this.add.text(W * 0.4, -H * 0.42, '✕', {
-      fontSize: '28px', color: '#fff', backgroundColor: '#333', padding: { x: 8, y: 4 },
+    // Player dot — use actual rendered image dimensions (fitContain may
+    // letterbox, so displayWidth/Height reflect the true pixel footprint)
+    const mW = mapImg.displayWidth;
+    const mH = mapImg.displayHeight;
+    const dotX = (this.player.x / WORLD_WIDTH) * mW - mW / 2;
+    const dotY = (this.player.y / WORLD_HEIGHT) * mH - mH / 2;
+
+    // Dot color matches player's crew color so it's easy to spot
+    const colorName = (this.registry.get('playerColor') as string ?? 'Red').toLowerCase();
+    const colorMap: Record<string, number> = {
+      red: 0xff2222, blue: 0x4444ff, green: 0x22cc44, yellow: 0xffee22,
+      purple: 0xaa44ff, orange: 0xff8800, pink: 0xff88cc, brown: 0x996633,
+      black: 0x666666, white: 0xeeeeee, cyan: 0x22eeff, lime: 0x88ff44,
+      maroon: 0x881111, rose: 0xff6688, banana: 0xffee88, coral: 0xff6644,
+    };
+    const dotColor = colorMap[colorName] ?? 0xff4444;
+    const dot = this.add.arc(dotX, dotY, 8, 0, 360, false, dotColor)
+      .setStrokeStyle(1.5, 0xffffff);
+
+    // Close button — inside the overlay so it's always visible
+    const closeBtn = this.add.text(W * 0.45, -H * 0.46, '✕ Close', {
+      fontSize: '22px', color: '#fff', backgroundColor: '#333355',
+      padding: { x: 10, y: 6 },
     }).setOrigin(1, 0).setInteractive();
     closeBtn.on('pointerdown', () => this.closeMiniMap());
 
     this.miniMapOverlay.add([bg, mapImg, dot, closeBtn]);
     this.cameras.main.ignore(this.miniMapOverlay);
+
+    // Also close on tap anywhere on the overlay background
+    bg.setInteractive();
+    bg.on('pointerdown', () => this.closeMiniMap());
+
     this.input.keyboard!.once('keydown-M', () => this.closeMiniMap());
   }
 
