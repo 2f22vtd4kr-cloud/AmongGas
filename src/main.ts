@@ -19,13 +19,12 @@ import { ClearAsteroidsScene } from './scenes/tasks/ClearAsteroidsScene';
 // against that resolution, so changing it makes everything render at the
 // wrong physical size on real devices (font sizes, button/icon dimensions,
 // panel widths, etc. don't auto-rescale just because the canvas resolution
-// changed, unlike world-space camera zoom). The black perimeter bars are
-// instead removed purely in CSS: the canvas is stretched to 100% of the
-// viewport's width/height (see index.html), which fills the screen edge to
-// edge with only a very mild non-uniform stretch (the design aspect ratio
-// is already close to most phone aspect ratios), while every game object's
-// on-canvas pixel size — and therefore its rendered size — stays exactly
-// as originally designed.
+// changed, unlike world-space camera zoom). Scale.FIT below scales that
+// fixed canvas up uniformly (same factor on both axes) to fill as much of
+// the screen as possible without distorting anything; any leftover
+// letterbox/pillarbox sliver is blended into the page background instead
+// of shown as black bars (see index.html for why we don't stretch or crop
+// the canvas itself to force a literal edge-to-edge fill).
 const config: Phaser.Types.Core.GameConfig = {
   type: Phaser.AUTO,
   width: 750,

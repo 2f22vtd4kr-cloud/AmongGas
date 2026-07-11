@@ -13,25 +13,36 @@
       width: 100%;
       height: 100%;
       overflow: hidden;
-      background: #000;
+      /* Space-themed backdrop (matches the Phaser config's own
+         backgroundColor and the loading screen) so that whatever sliver of
+         page shows around the letterboxed/pillarboxed canvas blends with
+         the game's own palette instead of looking like a broken black
+         stripe. See the #game-container comment below for why we keep
+         Phaser's own uniform FIT scaling instead of stretching the canvas
+         with CSS. */
+      background: radial-gradient(ellipse at 50% 30%, #241143 0%, #140826 55%, #0a0416 100%);
       touch-action: none;
     }
-    /* Stretch the game canvas to fill the full viewport edge-to-edge
-       instead of Phaser's own FIT letterboxing/pillarboxing, which left
-       black bars whenever the device aspect ratio didn't exactly match
-       the game's fixed 750x1334 design resolution. This is a pure CSS
-       stretch — the game's internal design resolution is unchanged, so
-       every HUD element keeps the exact on-screen size it was tuned for;
-       only the rendered canvas is scaled (slightly non-uniformly) to
-       cover the whole screen. */
-    #game-container {
-      width: 100%;
-      height: 100%;
-    }
+    /* We deliberately do NOT force the canvas to 100%/100% here. Every HUD
+       element (buttons, fonts, panels, task arrows) is hand-tuned in
+       literal pixels against the game's fixed 750x1334 design resolution,
+       and Phaser's Scale.FIT already scales that canvas up UNIFORMLY
+       (same factor on both axes) to be as large as possible while staying
+       centered on screen — this preserves every circle/icon's correct
+       aspect ratio and keeps the task-arrow inset margins accurate.
+       Forcing independent width:100%/height:100% stretches the two axes by
+       different amounts whenever the device aspect ratio isn't exactly
+       750:1334, which is what deformed circular buttons into ovals. A
+       "cover" crop (scale up until there are truly zero bars) was also
+       ruled out: on real phone aspect ratios it would crop 60-90+ virtual
+       pixels off the sides of the design canvas, cutting directly into the
+       corner-anchored HUD buttons (emergency, kill/report/use, minimap).
+       So we keep Phaser's own uniform, non-cropping FIT centering, and
+       only close the visual gap by matching the surrounding page
+       background to the game's own space palette above. */
     #game-container canvas {
-      display: block !important;
-      width: 100% !important;
-      height: 100% !important;
+      display: block;
+      margin: 0 auto;
     }
     /* Portrait-only rotate prompt — shown only when in landscape on mobile */
     #rotate-prompt {
