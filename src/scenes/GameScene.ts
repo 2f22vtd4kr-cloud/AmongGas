@@ -8,6 +8,7 @@ import {
 } from '../settings';
 import type { TaskDef, BotData } from '../types';
 import { parseTmx } from '../utils/TmxParser';
+import { fitContain } from '../utils/imageFit';
 
 const BOT_NAMES = ['Alpha','Beta','Gamma','Delta','Epsilon','Zeta','Eta','Theta'];
 const BOT_COLOR_POOL = ['Black','Brown','Pink','Purple','White','Orange','Blue','Yellow'];
@@ -565,7 +566,7 @@ export class GameScene extends Phaser.Scene {
     const { width: W, height: H } = this.scale;
     const overlay = this.add.rectangle(W / 2, H / 2, W, H, 0x000000, 0.7).setScrollFactor(0).setDepth(200);
     const alertImg = this.textures.exists(imgKey)
-      ? this.add.image(W / 2, H / 2, imgKey).setScrollFactor(0).setDepth(201).setDisplaySize(W * 0.8, H * 0.5)
+      ? fitContain(this.add.image(W / 2, H / 2, imgKey).setScrollFactor(0).setDepth(201), W * 0.8, H * 0.5)
       : this.add.text(W / 2, H / 2, isReport ? '💀 Body Reported!' : '🚨 Emergency Meeting!', {
           fontSize: '40px', color: '#ff2222', fontFamily: 'Arial',
         }).setOrigin(0.5).setScrollFactor(0).setDepth(201);
@@ -703,7 +704,7 @@ export class GameScene extends Phaser.Scene {
     const { width: W, height: H } = this.scale;
     this.miniMapOverlay = this.add.container(W / 2, H / 2).setScrollFactor(0).setDepth(300);
     const bg = this.add.rectangle(0, 0, W * 0.85, H * 0.85, 0x000000, 0.92);
-    const mapImg = this.add.image(0, 0, 'minimap').setDisplaySize(W * 0.8, H * 0.8);
+    const mapImg = fitContain(this.add.image(0, 0, 'minimap'), W * 0.8, H * 0.8);
 
     // Player dot
     const px = (this.player.x / WORLD_WIDTH) * (W * 0.8) - W * 0.4;

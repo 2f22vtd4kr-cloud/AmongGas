@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { fitContain } from '../utils/imageFit';
 
 interface VictoryData {
   winner: 'crew' | 'impostor';
@@ -28,8 +29,7 @@ export class VictoryScene extends Phaser.Scene {
     // Alert image
     const imgKey = isCrew ? 'alert_victory' : 'alert_defeat';
     if (this.textures.exists(imgKey)) {
-      this.add.image(W / 2, H * 0.3, imgKey)
-        .setDisplaySize(W * 0.6, H * 0.35);
+      fitContain(this.add.image(W / 2, H * 0.3, imgKey), W * 0.6, H * 0.35);
     }
 
     // Winner text

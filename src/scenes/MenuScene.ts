@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { fitContain, fitCover } from '../utils/imageFit';
 
 type MenuSection = 'main' | 'charSelect' | 'nameInput' | 'help' | 'credits';
 
@@ -39,17 +40,16 @@ export class MenuScene extends Phaser.Scene {
     const { width: W, height: H } = this.scale;
 
     // Background
-    this.add.image(W / 2, H / 2, 'menu_back').setDisplaySize(W, H);
+    fitCover(this.add.image(W / 2, H / 2, 'menu_back'), W, H);
 
     // Title
-    this.add.image(W / 2, H * 0.13, 'menu_title').setDisplaySize(W * 0.5, H * 0.18);
+    fitContain(this.add.image(W / 2, H * 0.13, 'menu_title'), W * 0.5, H * 0.18);
 
     // Menu option images
     const imgs = ['menu_freeplay','menu_online','menu_help','menu_credits','menu_quit'];
     const yPos = [0.36, 0.47, 0.58, 0.68, 0.77];
     for (let i = 0; i < imgs.length; i++) {
-      const btn = this.add.image(W * 0.5, H * yPos[i], imgs[i])
-        .setDisplaySize(W * 0.22, H * 0.07)
+      const btn = fitContain(this.add.image(W * 0.5, H * yPos[i], imgs[i]), W * 0.22, H * 0.07)
         .setInteractive();
       const idx = i;
       btn.on('pointerdown', () => {
@@ -132,16 +132,16 @@ export class MenuScene extends Phaser.Scene {
     const { width: W, height: H } = this.scale;
     this.clearScene();
 
-    this.add.image(W/2, H/2, 'menu_back2').setDisplaySize(W, H);
-    this.add.image(W/2, H*0.08, 'menu_choosecolour').setDisplaySize(W*0.4, H*0.1);
+    fitCover(this.add.image(W/2, H/2, 'menu_back2'), W, H);
+    fitContain(this.add.image(W/2, H*0.08, 'menu_choosecolour'), W*0.4, H*0.1);
 
     const colors = ['Red','Blue','Orange','Yellow','Green'];
     const colorImgs = ['menu_color_red','menu_color_blue','menu_color_orange','menu_color_yellow','menu_color_green'];
     const yFracs = [0.25, 0.38, 0.51, 0.64, 0.77];
 
     for (let i = 0; i < colors.length; i++) {
-      const btn = this.add.image(W*0.5, H*yFracs[i], colorImgs[i])
-        .setDisplaySize(120, 90).setInteractive();
+      const btn = fitContain(this.add.image(W*0.5, H*yFracs[i], colorImgs[i]), 120, 90)
+        .setInteractive();
       const color = colors[i];
       btn.on('pointerdown', () => {
         this.playerColor = color;
@@ -167,9 +167,9 @@ export class MenuScene extends Phaser.Scene {
     const { width: W, height: H } = this.scale;
     this.clearScene();
 
-    this.add.image(W/2, H/2, 'menu_back2').setDisplaySize(W, H);
-    this.add.image(W/2, H*0.25, 'menu_entername').setDisplaySize(W*0.35, H*0.1);
-    this.add.image(W/2, H*0.45, 'menu_input').setDisplaySize(W*0.35, H*0.1);
+    fitCover(this.add.image(W/2, H/2, 'menu_back2'), W, H);
+    fitContain(this.add.image(W/2, H*0.25, 'menu_entername'), W*0.35, H*0.1);
+    fitContain(this.add.image(W/2, H*0.45, 'menu_input'), W*0.35, H*0.1);
 
     this.nameText = this.add.text(W/2, H*0.45, '', {
       fontSize: '28px',
@@ -227,7 +227,7 @@ export class MenuScene extends Phaser.Scene {
     this.clearScene();
 
     const page = Phaser.Math.Clamp(this.helpPage, 0, 8);
-    this.add.image(W/2, H/2, `help_${page + 1}`).setDisplaySize(W, H);
+    fitCover(this.add.image(W/2, H/2, `help_${page + 1}`), W, H);
 
     const prevBtn = this.add.text(40, H/2, '◀', {
       fontSize: '48px', color: '#fff', backgroundColor: '#0006',
@@ -254,7 +254,7 @@ export class MenuScene extends Phaser.Scene {
   private showCredits() {
     const { width: W, height: H } = this.scale;
     this.clearScene();
-    this.add.image(W/2, H/2, 'credits_img').setDisplaySize(W, H);
+    fitCover(this.add.image(W/2, H/2, 'credits_img'), W, H);
     this.input.keyboard!.once('keydown-ESC', () => {
       if (this.cache.audio.exists('sfx_go_back')) this.sound.play('sfx_go_back', { volume: 0.6 });
       this.scene.restart();

@@ -1,0 +1,2 @@
+- [Phaser UI camera for zoomed HUDs](phaser-zoomed-hud-camera.md) — `setScrollFactor(0)` objects still warp under main camera zoom; use a second unzoomed camera with mutual `.ignore()` lists.
+- [Phaser image aspect distortion](phaser-image-aspect-distortion.md) — `setDisplaySize(W*fx, H*fy)` with independent width/height fractions silently stretches art when canvas aspect ratio changes; use contain/cover helpers keyed off native texture size instead.
