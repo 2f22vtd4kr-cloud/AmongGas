@@ -165,6 +165,12 @@ Browser loads index.html
   - MeetingScene single-column: 9 voters × 72px row = 648px from startY=108 → bottom 756px, well clear of skip button at H−30=1304 ✓.
   - TypeScript: clean (`tsc --noEmit` passes).
 
+### Session 7 (2026-07-11)
+- **Bot walk animations fixed**: removed a faulty `this.scene.anims.exists(animKey)` guard introduced in Session 6 that was silently blocking `anims.play()`. Bots now call `play()` directly, matching the Player pattern. Bots with FULL_COLORS (Blue/Green/Orange/Yellow) now show their 18-frame walk sheets.
+- **Walk animation speed doubled**: `frameRate` raised from 20 → 40 fps for all FULL_COLORS walk animations. Stride cycle now matches movement speed visually.
+- **Bot Y-bob for single-frame colors**: BASIC_COLOR bots (Black/Brown/Pink/Purple/White) still have only 1 sprite frame. When moving, they now get a subtle 5% vertical scale squeeze at ~4 Hz using `Math.sin(bobTimer * 0.025 + bobPhase)`. Each bot has a random `bobPhase` so they don't all pulse in sync. Scale resets to (1, 1) when still or when a full animation is active.
+- **Security monitor prop removed from world**: `security_room_comp` was mapped to `security_monitor.png`, which is a rendered image of a security-camera room view — it produced a "room inside a room" visual artifact in the security room corner. Removed the key from `placeItemSprites` imgMap. Task proximity detection is unaffected (it uses TMX coordinates, not sprites).
+
 ### Next Session Priorities
 1. Consider lazy-loading ambient sounds per room (31 MB currently omitted)
 2. Wire up Telegram user identity (pre-fill player name from `initDataUnsafe.user.first_name`)
