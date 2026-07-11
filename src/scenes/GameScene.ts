@@ -913,6 +913,32 @@ export class GameScene extends Phaser.Scene {
     const dot = this.add.arc(dotX, dotY, 8, 0, 360, false, dotColor)
       .setStrokeStyle(1.5, 0xffffff);
 
+    // Task markers — a yellow "!" over every incomplete task's room, same
+    // world→map coordinate transform as the player dot, so players can plan
+    // a route instead of memorizing task locations.
+    const markerObjs: Phaser.GameObjects.GameObject[] = [];
+    const seenSpots = new Set<string>(); // dedupe overlapping task locations
+    for (const task of this.tasks) {
+      if (task.completed) continue;
+      const spotKey = `${Math.round(task.x / 20)},${Math.round(task.y / 20)}`;
+      if (seenSpots.has(spotKey)) continue;
+      seenSpots.add(spotKey);
+
+      const tx = (task.x / WORLD_WIDTH) * mW - mW / 2;
+      const ty = (task.y / WORLD_HEIGHT) * mH - mH / 2;
+      const marker = this.add.text(tx, ty, '!', {
+        fontSize: '22px', color: '#ffee22', fontStyle: 'bold', fontFamily: 'Arial',
+        stroke: '#664400', strokeThickness: 3,
+      }).setOrigin(0.5);
+      markerObjs.push(marker);
+
+      // Gentle pulse so markers stay noticeable on a busy map
+      this.tweens.add({
+        targets: marker, scale: 1.25, duration: 500,
+        yoyo: true, repeat: -1, ease: 'Sine.easeInOut',
+      });
+    }
+
     // Close button — inside the overlay so it's always visible
     const closeBtn = this.add.text(W * 0.45, -H * 0.46, '✕ Close', {
       fontSize: '22px', color: '#fff', backgroundColor: '#333355',
@@ -920,7 +946,7 @@ export class GameScene extends Phaser.Scene {
     }).setOrigin(1, 0).setInteractive();
     closeBtn.on('pointerdown', () => this.closeMiniMap());
 
-    this.miniMapOverlay.add([bg, mapImg, dot, closeBtn]);
+    this.miniMapOverlay.add([bg, mapImg, ...markerObjs, dot, closeBtn]);
     this.cameras.main.ignore(this.miniMapOverlay);
 
     // Also close on tap anywhere on the overlay background
@@ -931,7 +957,11 @@ export class GameScene extends Phaser.Scene {
   }
 
   private closeMiniMap() {
-    this.miniMapOverlay?.destroy();
+    if (this.miniMapOverlay) {
+      // Stop any pulsing task-marker tweens before destroying their targets
+      this.tweens.killTweensOf(this.miniMapOverlay.list);
+      this.miniMapOverlay.destroy();
+    }
     this.miniMapOverlay = undefined;
   }
 
