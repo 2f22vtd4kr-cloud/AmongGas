@@ -261,7 +261,7 @@ export class MenuScene extends Phaser.Scene {
     this.registry.set('playerName', this.playerName || 'Crewmate');
     this.registry.set('playerColor', this.playerColor);
     this.music?.stop();
-    this.scene.start('GameScene');
+    this.scene.start('GamePreloadScene');
   }
 
   private cleanupInput() {

@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { PreloadScene } from './scenes/PreloadScene';
+import { GamePreloadScene } from './scenes/GamePreloadScene';
 import { MenuScene } from './scenes/MenuScene';
 import { GameScene } from './scenes/GameScene';
 import { MeetingScene } from './scenes/MeetingScene';
@@ -32,6 +33,7 @@ const config: Phaser.Types.Core.GameConfig = {
   },
   scene: [
     PreloadScene,
+    GamePreloadScene,
     MenuScene,
     GameScene,
     MeetingScene,
