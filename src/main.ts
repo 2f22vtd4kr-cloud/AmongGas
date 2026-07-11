@@ -14,38 +14,22 @@ import { AlignEngineScene } from './scenes/tasks/AlignEngineScene';
 import { EmptyGarbageScene } from './scenes/tasks/EmptyGarbageScene';
 import { ClearAsteroidsScene } from './scenes/tasks/ClearAsteroidsScene';
 
-// Telegram Mini App bootstrap — safe to call even outside Telegram. Run
-// this *before* sizing the canvas: tg.expand() maximizes the WebView
-// viewport, and we want the very first frame to size against that
-// maximized viewport rather than a smaller pre-expand one.
-const tg = (window as unknown as { Telegram?: { WebApp?: {
-  ready(): void;
-  expand(): void;
-  disableVerticalSwipes?(): void;
-} } }).Telegram?.WebApp;
-if (tg) {
-  tg.ready();
-  tg.expand();
-  tg.disableVerticalSwipes?.();
-}
-
-// The game's internal resolution is set to the actual on-screen viewport
-// (not a fixed "design" size like 750x1334) so Phaser's FIT scaling has
-// zero leftover space in either axis — no black letterbox/pillarbox bars
-// around the game. A fixed design canvas whose aspect ratio doesn't match
-// the device's (e.g. taller/narrower modern phones vs. an older 0.56
-// aspect) is exactly what caused the bars. HUD element positions are
-// already derived from `this.scale.width/height` at runtime (see
-// GameScene/MenuScene), so they adapt automatically; safe-area insets
-// (readSafeInsets in GameScene) still reserve the same margins for
-// buttons as before — only the surrounding black bars are removed.
-const initialW = Math.max(1, Math.round(window.innerWidth || 750));
-const initialH = Math.max(1, Math.round(window.innerHeight || 1334));
-
+// The game keeps its original fixed 750x1334 internal design resolution —
+// every HUD/text/icon size in the game was hand-tuned in literal pixels
+// against that resolution, so changing it makes everything render at the
+// wrong physical size on real devices (font sizes, button/icon dimensions,
+// panel widths, etc. don't auto-rescale just because the canvas resolution
+// changed, unlike world-space camera zoom). The black perimeter bars are
+// instead removed purely in CSS: the canvas is stretched to 100% of the
+// viewport's width/height (see index.html), which fills the screen edge to
+// edge with only a very mild non-uniform stretch (the design aspect ratio
+// is already close to most phone aspect ratios), while every game object's
+// on-canvas pixel size — and therefore its rendered size — stays exactly
+// as originally designed.
 const config: Phaser.Types.Core.GameConfig = {
   type: Phaser.AUTO,
-  width: initialW,
-  height: initialH,
+  width: 750,
+  height: 1334,
   parent: 'game-container',
   backgroundColor: '#1a0a2e',
   physics: {
@@ -80,14 +64,19 @@ const config: Phaser.Types.Core.GameConfig = {
   },
 };
 
-const game = new Phaser.Game(config);
+// Telegram Mini App bootstrap — safe to call even outside Telegram
+const tg = (window as unknown as { Telegram?: { WebApp?: {
+  ready(): void;
+  expand(): void;
+  disableVerticalSwipes?(): void;
+} } }).Telegram?.WebApp;
+if (tg) {
+  tg.ready();
+  tg.expand();
+  tg.disableVerticalSwipes?.();
+}
 
-// Re-match the canvas resolution to the viewport whenever it changes (e.g.
-// mobile browser chrome show/hide, orientation change, Telegram WebView
-// viewport events arriving after boot) so the bars can't reappear later.
-window.addEventListener('resize', () => {
-  game.scale.resize(window.innerWidth, window.innerHeight);
-});
+const game = new Phaser.Game(config);
 
 // Hide HTML loading screen once Phaser is ready
 game.events.once('ready', () => {

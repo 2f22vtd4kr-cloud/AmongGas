@@ -4,7 +4,7 @@ import { Bot } from '../objects/Bot';
 import {
   BOT_POS, ALL_COLORS, PLAYER_SPAWN, WORLD_WIDTH, WORLD_HEIGHT,
   INTERACT_RADIUS, KILL_RADIUS, REPORT_RADIUS, NO_OF_MISSIONS,
-  AMBIENT_CENTRES, TASK_TITLES, CAMERA_ZOOM, WIDTH, HEIGHT,
+  AMBIENT_CENTRES, TASK_TITLES, CAMERA_ZOOM,
 } from '../settings';
 import type { TaskDef, BotData } from '../types';
 import { parseTmx } from '../utils/TmxParser';
@@ -218,17 +218,10 @@ export class GameScene extends Phaser.Scene {
     this.physics.world.setBounds(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
     this.cameras.main.setBounds(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
     this.cameras.main.startFollow(this.player, true, 0.12, 0.12);
-    // CAMERA_ZOOM was tuned against the 750x1334 base design canvas. The
-    // canvas now boots at the device's real viewport size (see main.ts —
-    // that's what removed the black letterbox bars), which is usually a
-    // much smaller portrait width, so applying CAMERA_ZOOM unscaled would
-    // show far less of the world than intended and look "zoomed in".
-    // Scale it by how much smaller/larger the real canvas is than the
-    // design size (same factor Scale.FIT used to apply visually) so the
-    // amount of world visible — and how large the player/objects read —
-    // stays the same as originally tuned, regardless of device size.
-    this.applyCameraZoom();
-    this.scale.on('resize', this.applyCameraZoom, this);
+    // Portrait viewport is narrower than the original landscape frame, so we
+    // zoom in a bit to keep the player readable while still showing enough
+    // of the surrounding room. Tuned for the 750x1334 base design size.
+    this.cameras.main.setZoom(CAMERA_ZOOM);
 
     // ── Input ──
     this.cursors = this.input.keyboard!.createCursorKeys();
@@ -1180,24 +1173,11 @@ export class GameScene extends Phaser.Scene {
     this.miniMapOverlay = undefined;
   }
 
-  /**
-   * Re-derive the main camera's zoom from the real canvas size vs. the
-   * 750x1334 base design the CAMERA_ZOOM constant was tuned against, so
-   * the visible world area (and how large the player/HUD-adjacent world
-   * objects read) stays consistent across any device viewport. Re-run on
-   * every `resize` so orientation changes / viewport updates don't drift.
-   */
-  private applyCameraZoom() {
-    const scaleFactor = Math.min(this.scale.width / WIDTH, this.scale.height / HEIGHT);
-    this.cameras.main.setZoom(CAMERA_ZOOM * scaleFactor);
-  }
-
   shutdown() {
     // Stop ambient sounds
     for (const key of this.ambientPlaying) {
       this.sound.stopByKey(`amb_${key}`);
     }
     this.ambientPlaying.clear();
-    this.scale.off('resize', this.applyCameraZoom, this);
   }
 }

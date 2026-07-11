@@ -16,9 +16,22 @@
       background: #000;
       touch-action: none;
     }
-    canvas {
-      display: block;
-      margin: 0 auto;
+    /* Stretch the game canvas to fill the full viewport edge-to-edge
+       instead of Phaser's own FIT letterboxing/pillarboxing, which left
+       black bars whenever the device aspect ratio didn't exactly match
+       the game's fixed 750x1334 design resolution. This is a pure CSS
+       stretch — the game's internal design resolution is unchanged, so
+       every HUD element keeps the exact on-screen size it was tuned for;
+       only the rendered canvas is scaled (slightly non-uniformly) to
+       cover the whole screen. */
+    #game-container {
+      width: 100%;
+      height: 100%;
+    }
+    #game-container canvas {
+      display: block !important;
+      width: 100% !important;
+      height: 100% !important;
     }
     /* Portrait-only rotate prompt — shown only when in landscape on mobile */
     #rotate-prompt {
