@@ -122,6 +122,11 @@ export class GameScene extends Phaser.Scene {
     this.player = new Player(this, PLAYER_SPAWN.x, PLAYER_SPAWN.y, playerColor, playerName);
     this.physics.add.collider(this.player, this.walls);
 
+    // Prevent bots from standing on top of the player
+    for (const bot of this.bots) {
+      this.physics.add.collider(this.player, bot);
+    }
+
     // ── World bounds ──
     this.physics.world.setBounds(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
     this.cameras.main.setBounds(0, 0, WORLD_WIDTH, WORLD_HEIGHT);

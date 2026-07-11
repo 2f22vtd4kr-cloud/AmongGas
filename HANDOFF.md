@@ -141,6 +141,8 @@ Browser loads index.html
   - Dead body sprites loaded from `Assets/Images/Player/Dead/Dead{color}.png` for all 10 colors
 - Removed all `SpriteRecolor.ts` / `recolorCanvas` usage from `GamePreloadScene.ts`
 - `SpriteRecolor.ts` left in place but no longer imported
+- Added texture cache eviction in `GamePreloadScene.preload()`: removes all player sprite keys before loading, so old canvas-recolor textures from a previous in-tab session cannot silently block the real file loads
+- Added player-bot physics colliders in `GameScene.create()`: bots can no longer walk directly on top of the player, preventing the confusing red+blue overlap visual
 
 ### Next Session Priorities
 1. Consider lazy-loading ambient sounds per room (31 MB currently omitted)

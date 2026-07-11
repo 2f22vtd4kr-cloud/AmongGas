@@ -33,6 +33,26 @@ export class GamePreloadScene extends Phaser.Scene {
   preload() {
     const { width: W, height: H } = this.scale;
 
+    // ── Purge stale player textures from cache ────────────────────
+    // If a previous game session used runtime recoloring, Phaser's in-memory
+    // texture cache may still hold those canvas textures under the same keys.
+    // load.image() silently skips keys that already exist, so we must remove
+    // them first to guarantee the real asset files are loaded.
+    const keysToEvict: string[] = [];
+    for (const lc of FULL_COLORS) {
+      for (const dir of WALK_DIRS) {
+        for (let f = 1; f <= 18; f++) keysToEvict.push(`${lc}_${dir}_${f}`);
+      }
+      keysToEvict.push(`${lc}_ghost_1`, `${lc}_ghost_2`);
+    }
+    for (const lc of BASIC_COLORS) {
+      for (const dir of WALK_DIRS) keysToEvict.push(`${lc}_${dir}_1`);
+    }
+    for (const lc of ALL_COLORS) keysToEvict.push(`dead_${lc}`);
+    for (const key of keysToEvict) {
+      if (this.textures.exists(key)) this.textures.remove(key);
+    }
+
     // ── In-game loading bar ──────────────────────────────────────
     this.add.rectangle(W / 2, H / 2 - 60, W * 0.6, 40, 0x222244).setStrokeStyle(2, 0x6666cc);
     this.add.rectangle(W / 2, H / 2 - 60, W * 0.6 - 4, 36, 0x111133);
