@@ -152,7 +152,20 @@ Browser loads index.html
 - **Orientation lock**: Added CSS rotate-prompt (`#rotate-prompt`) shown via `@media (max-height:500px) and (orientation:landscape)` for mobile landscape users.
 - TypeScript check: clean (`tsc --noEmit` passes).
 
+### Session 6 (2026-07-11)
+- **Safe-area insets** added to `GameScene.ts`:
+  - New `safeTop`/`safeBot` class properties (default 0 outside Telegram).
+  - `readSafeInsets()` private method reads `window.Telegram?.WebApp?.safeAreaInset` (available TG ≥ 7.7).
+  - Called before `setupJoystick()` and `buildHUD()` in `create()`.
+  - Applied to all HUD Y positions: task bar (+safeTop), emergency btn (+safeTop), minimap btn (+safeTop), interact prompt (−safeBot), kill/report/use action buttons (−safeBot), virtual joystick base (−safeBot).
+  - Full-screen overlay positions (`triggerEmergency`, `resolveMeeting`, `toggleMiniMap`) are centered at H/2 — no adjustment needed.
+- **Task scene visual QA** (analytical — 750×1334 layout math):
+  - All panels (pw=560×ph=520 typ.) verified to fit within canvas with 95px left margin, 407px top margin.
+  - Peg/drag/lever hit areas confirmed generous (30–68px) on the new larger panels.
+  - MeetingScene single-column: 9 voters × 72px row = 648px from startY=108 → bottom 756px, well clear of skip button at H−30=1304 ✓.
+  - TypeScript: clean (`tsc --noEmit` passes).
+
 ### Next Session Priorities
-1. Verify Meeting/Victory/task UIs at phone viewport (360×800, 390×844) — Screenshot tool default is 1280×720 so portrait wasn't directly tested.
-2. Consider lazy-loading ambient sounds per room (31 MB currently omitted)
+1. Consider lazy-loading ambient sounds per room (31 MB currently omitted)
+2. Wire up Telegram user identity (pre-fill player name from `initDataUnsafe.user.first_name`)
 3. Test multiplayer (LOCAL) path

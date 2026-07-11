@@ -68,6 +68,11 @@ export class GameScene extends Phaser.Scene {
   private joystickStart = { x: 0, y: 0 };
   private joystickForce = { x: 0, y: 0 };
 
+  // --- device safe-area insets (notch / home bar) ---
+  // Read from Telegram WebApp SDK at boot; defaults to 0 outside Telegram.
+  private safeTop = 0;
+  private safeBot = 0;
+
   // --- nearby detection ---
   private nearbyTask: TaskDef | null = null;
   private nearbyCorpse: Bot | null = null;
@@ -158,6 +163,9 @@ export class GameScene extends Phaser.Scene {
     Phaser.Input.Keyboard.JustDown(this.eKey);
     Phaser.Input.Keyboard.JustDown(this.rKey);
 
+    // ── Safe-area insets (phone notch / home bar) ──
+    this.readSafeInsets();
+
     // ── Virtual joystick ──
     this.setupJoystick();
 
@@ -188,6 +196,21 @@ export class GameScene extends Phaser.Scene {
     this.input.keyboard!.on('keydown-ESC', () => {
       if (this.miniMapOverlay) { this.closeMiniMap(); return; }
     });
+  }
+
+  // ────────────────── Safe-area ──────────────────
+
+  /**
+   * Reads Telegram WebApp safe-area insets (notch height, home-bar height).
+   * Falls back to zero outside Telegram or on older SDK versions.
+   * Must be called before buildHUD() and setupJoystick().
+   */
+  private readSafeInsets() {
+    type TgWA = { safeAreaInset?: { top: number; bottom: number; left: number; right: number } };
+    const tg = (window as unknown as { Telegram?: { WebApp?: TgWA } }).Telegram?.WebApp;
+    const inset = tg?.safeAreaInset;
+    this.safeTop = Math.round(inset?.top    ?? 0);
+    this.safeBot = Math.round(inset?.bottom ?? 0);
   }
 
   // ────────────────── Tasks ──────────────────
@@ -267,31 +290,31 @@ export class GameScene extends Phaser.Scene {
     const { width: W, height: H } = this.scale;
     this.hud = this.add.container(0, 0).setScrollFactor(0).setDepth(100);
 
-    // Task progress bar background
-    const barBg = this.add.rectangle(W / 2, 12, 300, 18, 0x333333).setOrigin(0.5, 0);
-    const barBorder = this.add.rectangle(W / 2, 12, 302, 20, 0x888888).setOrigin(0.5, 0).setFillStyle(0x000000, 0).setStrokeStyle(1, 0xaaaaaa);
-    this.taskBarFill = this.add.rectangle(W / 2 - 150, 12, 0, 18, 0x00dd66).setOrigin(0, 0);
-    this.taskLabel = this.add.text(W / 2, 35, `Tasks: 0 / ${NO_OF_MISSIONS}`, {
+    // Task progress bar background — shifted down by safe-area top inset
+    const barY = 12 + this.safeTop;
+    const barBg = this.add.rectangle(W / 2, barY, 300, 18, 0x333333).setOrigin(0.5, 0);
+    const barBorder = this.add.rectangle(W / 2, barY, 302, 20, 0x888888).setOrigin(0.5, 0).setFillStyle(0x000000, 0).setStrokeStyle(1, 0xaaaaaa);
+    this.taskBarFill = this.add.rectangle(W / 2 - 150, barY, 0, 18, 0x00dd66).setOrigin(0, 0);
+    this.taskLabel = this.add.text(W / 2, barY + 23, `Tasks: 0 / ${NO_OF_MISSIONS}`, {
       fontSize: '14px', color: '#fff', stroke: '#000', strokeThickness: 3, fontFamily: 'Arial',
     }).setOrigin(0.5, 0);
     this.hud.add([barBg, barBorder, this.taskBarFill, this.taskLabel]);
 
     // Interact prompt — sits just above the action button stack so it never
     // overlaps a thumb resting on the buttons below it.
-    this.interactPrompt = this.add.text(W / 2, H - 210, '', {
+    this.interactPrompt = this.add.text(W / 2, H - 210 - this.safeBot, '', {
       fontSize: '18px', color: '#ffff00', stroke: '#000', strokeThickness: 4, fontFamily: 'Arial',
     }).setOrigin(0.5).setScrollFactor(0).setDepth(101).setVisible(false);
 
-    // Emergency meeting button — top-left, out of the way of the thumb zones
-    // used for movement (bottom-left) and actions (bottom-right).
-    this.emergencyBtn = this.add.text(16, 64, '🚨 MEETING', {
+    // Emergency meeting button — top-left, shifted down by safe-area inset.
+    this.emergencyBtn = this.add.text(16, 64 + this.safeTop, '🚨 MEETING', {
       fontSize: '14px', color: '#ff4444', backgroundColor: '#22000099',
       padding: { x: 10, y: 8 }, fontFamily: 'Arial', align: 'center',
     }).setScrollFactor(0).setDepth(101).setInteractive({ useHandCursor: true });
     this.emergencyBtn.on('pointerdown', () => this.triggerEmergency(false));
 
-    // Mini-map button (top-right)
-    this.miniMapBtn = this.add.image(W - 48, 48, 'ui_map_button')
+    // Mini-map button (top-right) — shifted down by safe-area inset.
+    this.miniMapBtn = this.add.image(W - 48, 48 + this.safeTop, 'ui_map_button')
       .setScrollFactor(0).setDepth(101).setDisplaySize(56, 56)
       .setInteractive({ useHandCursor: true });
     this.miniMapBtn.on('pointerdown', () => {
@@ -300,16 +323,17 @@ export class GameScene extends Phaser.Scene {
     });
 
     // ── Contextual action buttons — bottom-right, stacked vertically for
-    // comfortable thumb reach. Larger touch targets than the old inline
-    // text buttons; each is shown/hidden based on game state in detectNearby().
+    // comfortable thumb reach. Shifted up by safe-area bottom inset so they
+    // clear the home bar on notched phones.
     const actionX = W - 60;
-    this.killBtn = this.buildActionButton(actionX, H - 300, 46, 0xff2222, '🔪', () => this.attemptKill());
-    this.killBtn.setVisible(false); // player-impostor mode not enabled in Freeplay yet
+    const sb = this.safeBot;
+    this.killBtn = this.buildActionButton(actionX, H - 300 - sb, 46, 0xff2222, '🔪', () => this.attemptKill());
+    this.killBtn.setVisible(false);
 
-    this.reportBtn = this.buildActionButton(actionX, H - 180, 46, 0xff8888, '🚩', () => this.tryReport());
+    this.reportBtn = this.buildActionButton(actionX, H - 180 - sb, 46, 0xff8888, '🚩', () => this.tryReport());
     this.reportBtn.setVisible(false);
 
-    this.useBtn = this.buildActionButton(actionX, H - 60, 52, 0x88ff88, '✋', () => this.tryInteract());
+    this.useBtn = this.buildActionButton(actionX, H - 60 - sb, 52, 0x88ff88, '✋', () => this.tryInteract());
     this.useBtn.setVisible(false);
   }
 
@@ -359,7 +383,8 @@ export class GameScene extends Phaser.Scene {
   private setupJoystick() {
     const jSize = 80;
     const jx = 130;
-    const jy = this.scale.height - 170;
+    // Shift joystick up by safe-area bottom inset (home bar on iPhone etc.)
+    const jy = this.scale.height - 170 - this.safeBot;
     this.joystickBase = this.add.arc(jx, jy, jSize, 0, 360, false, 0x444444, 0.5)
       .setScrollFactor(0).setDepth(102).setStrokeStyle(2, 0x888888);
     this.joystickThumb = this.add.arc(jx, jy, 32, 0, 360, false, 0x888888, 0.8)
