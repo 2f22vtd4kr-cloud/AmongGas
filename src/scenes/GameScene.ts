@@ -66,6 +66,12 @@ export class GameScene extends Phaser.Scene {
   // --- task list HUD ---
   private taskListRows: Phaser.GameObjects.Text[] = [];
 
+  // --- task compass (directional arrow toward tracked task) ---
+  private selectedTaskId: string | null = null;
+  private taskArrow!: Phaser.GameObjects.Container;
+  private taskArrowIcon!: Phaser.GameObjects.Triangle;
+  private taskArrowLabel!: Phaser.GameObjects.Text;
+
   // --- UI overlay ---
   // A second, unzoomed camera dedicated to HUD/UI. Camera zoom/rotation on
   // the main (world) camera still applies to scrollFactor(0) objects, so
@@ -392,6 +398,57 @@ export class GameScene extends Phaser.Scene {
 
     // Task list panel — left side, below emergency button
     this.buildTaskListInHud();
+
+    // Directional compass — points toward the tracked task
+    this.buildTaskCompass();
+
+    // Initial highlight of the tracked row now that both exist
+    this.updateTaskList();
+  }
+
+  /**
+   * Builds a compass-style arrow HUD element that always points from the
+   * player toward their currently tracked task. Tapping a row in the task
+   * list picks that task as the target; otherwise it defaults to the first
+   * incomplete task. Mirrors the original Among Us "arrow toward selected
+   * task" navigation aid, so players don't have to memorize task locations.
+   */
+  private buildTaskCompass() {
+    const { width: W } = this.scale;
+    const barY = 12 + this.safeTop;
+    const cx = W / 2;
+    const cy = barY + 58;
+
+    this.taskArrow = this.add.container(cx, cy).setDepth(101);
+
+    const ring = this.add.circle(0, 0, 22, 0x000000, 0.55).setStrokeStyle(1.5, 0x99bbdd);
+    this.taskArrowIcon = this.add.triangle(0, 0, 0, -13, 10, 10, -10, 10, 0xffee22)
+      .setStrokeStyle(1.5, 0x664400);
+    this.taskArrowLabel = this.add.text(0, 30, '', {
+      fontSize: '11px', color: '#ffee22', fontFamily: 'Arial', fontStyle: 'bold',
+      stroke: '#000', strokeThickness: 3,
+    }).setOrigin(0.5, 0);
+
+    this.taskArrow.add([ring, this.taskArrowIcon, this.taskArrowLabel]);
+    this.hud.add(this.taskArrow);
+  }
+
+  /** Currently tracked task: manually selected one if still incomplete, else the first incomplete task in list order. */
+  private getTrackedTask(): TaskDef | null {
+    const selected = this.tasks.find(t => t.id === this.selectedTaskId);
+    if (selected && !selected.completed) return selected;
+    return this.tasks.find(t => !t.completed) ?? null;
+  }
+
+  /** Rotates the compass arrow to point from the player toward the tracked task each frame. */
+  private updateTaskArrow() {
+    const target = this.getTrackedTask();
+    if (!target) { this.taskArrow.setVisible(false); return; }
+    this.taskArrow.setVisible(true);
+    const angle = Phaser.Math.Angle.Between(this.player.x, this.player.y, target.x, target.y);
+    this.taskArrowIcon.rotation = angle + Math.PI / 2;
+    const label = SHORT_TASK_NAMES[target.type] ?? target.title;
+    if (this.taskArrowLabel.text !== label) this.taskArrowLabel.setText(label);
   }
 
   /**
@@ -419,12 +476,25 @@ export class GameScene extends Phaser.Scene {
     for (let i = 0; i < this.tasks.length; i++) {
       const task = this.tasks[i];
       const label = SHORT_TASK_NAMES[task.type] ?? task.title.slice(0, 14);
-      const t = this.add.text(listX + 6, listY + 18 + i * rowH, `\u25a1 ${label}`, {
+      const rowY = listY + 18 + i * rowH;
+      const t = this.add.text(listX + 6, rowY, `\u25a1 ${label}`, {
         fontSize: '11px', color: '#aaaaaa', fontFamily: 'Arial',
         stroke: '#000', strokeThickness: 2,
       });
       this.taskListRows.push(t);
       this.hud.add(t);
+
+      // Invisible hit target (bigger than the text) so tapping a row on
+      // mobile picks it as the compass's tracked task.
+      const hit = this.add.rectangle(listX + listW / 2, rowY + rowH / 2 - 2, listW, rowH, 0x000000, 0)
+        .setInteractive({ useHandCursor: true });
+      hit.on('pointerdown', () => {
+        if (task.completed) return;
+        this.selectedTaskId = task.id;
+        this.updateTaskList();
+        this.updateTaskArrow();
+      });
+      this.hud.add(hit);
     }
   }
 
@@ -593,6 +663,9 @@ export class GameScene extends Phaser.Scene {
     // Update task bar
     this.updateTaskBar();
 
+    // Update directional compass arrow toward the tracked task
+    this.updateTaskArrow();
+
     // Win check
     this.checkWinConditions();
   }
@@ -718,12 +791,15 @@ export class GameScene extends Phaser.Scene {
 
   /** Refresh the task-list rows to reflect current completion state. */
   private updateTaskList() {
+    const tracked = this.getTrackedTask();
     for (let i = 0; i < this.taskListRows.length; i++) {
       const task = this.tasks[i];
       if (!task) continue;
       const label = SHORT_TASK_NAMES[task.type] ?? task.title.slice(0, 14);
       if (task.completed) {
         this.taskListRows[i].setText(`\u2713 ${label}`).setColor('#44dd77');
+      } else if (tracked && task.id === tracked.id) {
+        this.taskListRows[i].setText(`\u25b8 ${label}`).setColor('#ffee22');
       } else {
         this.taskListRows[i].setText(`\u25a1 ${label}`).setColor('#aaaaaa');
       }
