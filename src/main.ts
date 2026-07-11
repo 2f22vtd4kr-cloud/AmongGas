@@ -52,6 +52,18 @@ const config: Phaser.Types.Core.GameConfig = {
   },
 };
 
+// Telegram Mini App bootstrap — safe to call even outside Telegram
+const tg = (window as unknown as { Telegram?: { WebApp?: {
+  ready(): void;
+  expand(): void;
+  disableVerticalSwipes?(): void;
+} } }).Telegram?.WebApp;
+if (tg) {
+  tg.ready();
+  tg.expand();
+  tg.disableVerticalSwipes?.();
+}
+
 const game = new Phaser.Game(config);
 
 // Hide HTML loading screen once Phaser is ready

@@ -144,6 +144,15 @@ Browser loads index.html
 - Added texture cache eviction in `GamePreloadScene.preload()`: removes all player sprite keys before loading, so old canvas-recolor textures from a previous in-tab session cannot silently block the real file loads
 - Added player-bot physics colliders in `GameScene.create()`: bots can no longer walk directly on top of the player, preventing the confusing red+blue overlap visual
 
+### Session 5 (2026-07-11)
+- **MeetingScene** redesigned for portrait: switched to single-column voter list (rowH=72px), larger fonts (22px names), bigger swatch (36×36), result overlay uses canvas-relative width, larger Skip button.
+- **Task mini-scenes (all 7 panel-based)**: panels now dynamic — `pw = min(W-60, 560)`, `ph = min(H×0.52, 520)` — fills portrait screen instead of tiny fixed panels. Close buttons enlarged. All touch hit areas increased (e.g. FixWiring pegs 20→30px radius, StabilizeNav drag 30→42px, RebootWifi lever ±30→50px, AlignEngine ±30→52px, EmptyGarbage ±30→68px). FuelEngineScene.update() no longer hardcodes ph=420; uses `this._pw`/`this._ph` stored in create().
+- **MenuScene**: Help page arrows enlarged for touch (52px, 16px padding), back button added (touch-friendly ✕ Back) to Help and Credits pages. showNotice box width now canvas-relative.
+- **Telegram SDK**: Added `<script src="https://telegram.org/js/telegram-web-app.js">` to `index.html`. In `src/main.ts`, calls `tg.ready()`, `tg.expand()`, `tg.disableVerticalSwipes?.()` at boot. Note: `disableVerticalSwipes` requires TG ≥ 7.7; SDK logs a warning in older versions (harmless).
+- **Orientation lock**: Added CSS rotate-prompt (`#rotate-prompt`) shown via `@media (max-height:500px) and (orientation:landscape)` for mobile landscape users.
+- TypeScript check: clean (`tsc --noEmit` passes).
+
 ### Next Session Priorities
-1. Consider lazy-loading ambient sounds per room (31 MB currently omitted)
-2. Test multiplayer (LOCAL) path
+1. Verify Meeting/Victory/task UIs at phone viewport (360×800, 390×844) — Screenshot tool default is 1280×720 so portrait wasn't directly tested.
+2. Consider lazy-loading ambient sounds per room (31 MB currently omitted)
+3. Test multiplayer (LOCAL) path

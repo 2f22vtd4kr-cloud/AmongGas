@@ -11,8 +11,10 @@ export class StabilizeNavScene extends Phaser.Scene {
   private isDragging = false;
   private graphics!: Phaser.GameObjects.Graphics;
   private stableTime = 0;
-  private STABLE_NEEDED = 2.5; // seconds
+  private STABLE_NEEDED = 2.5;
   private indicator?: Phaser.GameObjects.Text;
+  // panel bounds stored for clamping in update
+  private panelBounds = { px: 0, py: 0, pw: 0, ph: 0 };
 
   constructor() { super({ key: 'StabilizeNavScene' }); }
   init(d: TaskData) { this.gameScene = d.gameScene; this.taskId = d.taskId; }
@@ -21,56 +23,57 @@ export class StabilizeNavScene extends Phaser.Scene {
     const { width: W, height: H } = this.scale;
     this.add.rectangle(W/2, H/2, W, H, 0x000000, 0.85);
 
-    const pw = 460, ph = 400;
+    const pw = Math.min(W - 60, 560);
+    const ph = Math.min(Math.round(H * 0.52), 520);
     const px = (W-pw)/2, py = (H-ph)/2;
+    this.panelBounds = { px, py, pw, ph };
 
-    // Panel background from original asset
     if (this.textures.exists('task_nav_base')) {
       this.add.image(W/2, H/2, 'task_nav_base').setDisplaySize(pw, ph);
     } else {
       this.add.rectangle(W/2, H/2, pw, ph, 0x0a1628).setStrokeStyle(2, 0x0044ff);
     }
 
-    this.add.text(W/2, py+16, "Stabilize The Ship's Navigation", {
-      fontSize: '18px', color: '#88aaff', fontFamily: 'Arial',
+    this.add.text(W/2, py+18, "Stabilize The Ship's Navigation", {
+      fontSize: '20px', color: '#88aaff', fontFamily: 'Arial', fontStyle: 'bold',
     }).setOrigin(0.5, 0);
 
-    const closeBtn = this.add.text(px+pw-10, py+10, '✕', {
-      fontSize: '22px', color: '#fff', backgroundColor: '#333', padding: { x: 6, y: 2 },
+    const closeBtn = this.add.text(px+pw-12, py+12, '✕', {
+      fontSize: '28px', color: '#fff', backgroundColor: '#444', padding: { x: 10, y: 4 },
     }).setOrigin(1,0).setInteractive();
     closeBtn.on('pointerdown', () => this.closeTask());
 
-    // Target crosshair (random position within safe area)
-    const area = { x: px+80, y: py+80, w: pw-160, h: ph-160 };
+    // Target (random position in safe area)
+    const area = { x: px+90, y: py+90, w: pw-180, h: ph-180 };
     this.targetX = area.x + Math.random() * area.w;
     this.targetY = area.y + Math.random() * area.h;
 
-    // Target center image (overlaid on top of graphics crosshair)
     if (this.textures.exists('task_nav_center')) {
-      this.add.image(this.targetX, this.targetY, 'task_nav_center').setDisplaySize(44, 44).setAlpha(0.9);
+      this.add.image(this.targetX, this.targetY, 'task_nav_center').setDisplaySize(52, 52).setAlpha(0.9);
     }
 
-    // Joystick starts at center
+    // Joystick starts at panel center
     this.joystickX = W/2;
     this.joystickY = H/2 + 30;
 
     this.graphics = this.add.graphics();
     this.renderScene();
 
-    this.indicator = this.add.text(W/2, py+ph-28, 'Hold the marker on target!', {
-      fontSize: '15px', color: '#ffff00', fontFamily: 'Arial',
+    this.indicator = this.add.text(W/2, py+ph-30, 'Hold the marker on target!', {
+      fontSize: '18px', color: '#ffff00', fontFamily: 'Arial',
     }).setOrigin(0.5, 1);
 
-    // Dragging
+    // Drag hit radius generous for touch
+    const hitR = 42;
     this.input.on('pointerdown', (p: Phaser.Input.Pointer) => {
-      if (Phaser.Math.Distance.Between(p.x, p.y, this.joystickX, this.joystickY) < 30) {
+      if (Phaser.Math.Distance.Between(p.x, p.y, this.joystickX, this.joystickY) < hitR) {
         this.isDragging = true;
       }
     });
     this.input.on('pointermove', (p: Phaser.Input.Pointer) => {
       if (!this.isDragging) return;
-      this.joystickX = Phaser.Math.Clamp(p.x, px+40, px+pw-40);
-      this.joystickY = Phaser.Math.Clamp(p.y, py+60, py+ph-40);
+      this.joystickX = Phaser.Math.Clamp(p.x, px+50, px+pw-50);
+      this.joystickY = Phaser.Math.Clamp(p.y, py+70, py+ph-50);
     });
     this.input.on('pointerup', () => { this.isDragging = false; });
   }
@@ -78,12 +81,10 @@ export class StabilizeNavScene extends Phaser.Scene {
   update(_t: number, delta: number) {
     this.renderScene();
     const dist = Phaser.Math.Distance.Between(this.joystickX, this.joystickY, this.targetX, this.targetY);
-    if (dist < 20) {
+    if (dist < 25) {
       this.stableTime += delta / 1000;
       if (this.indicator) this.indicator.setText(`Hold… ${(this.STABLE_NEEDED - this.stableTime).toFixed(1)}s`);
-      if (this.stableTime >= this.STABLE_NEEDED) {
-        this.showSuccess();
-      }
+      if (this.stableTime >= this.STABLE_NEEDED) this.showSuccess();
     } else {
       this.stableTime = 0;
       if (this.indicator) this.indicator.setText('Hold the marker on target!');
@@ -92,28 +93,28 @@ export class StabilizeNavScene extends Phaser.Scene {
 
   private renderScene() {
     this.graphics.clear();
-    // Target
+    // Target crosshair
     this.graphics.lineStyle(2, 0xff4400, 0.8);
-    this.graphics.strokeCircle(this.targetX, this.targetY, 20);
+    this.graphics.strokeCircle(this.targetX, this.targetY, 25);
     this.graphics.lineStyle(1, 0xff4400, 0.6);
     this.graphics.beginPath();
-    this.graphics.moveTo(this.targetX-30, this.targetY);
-    this.graphics.lineTo(this.targetX+30, this.targetY);
-    this.graphics.moveTo(this.targetX, this.targetY-30);
-    this.graphics.lineTo(this.targetX, this.targetY+30);
+    this.graphics.moveTo(this.targetX-36, this.targetY);
+    this.graphics.lineTo(this.targetX+36, this.targetY);
+    this.graphics.moveTo(this.targetX, this.targetY-36);
+    this.graphics.lineTo(this.targetX, this.targetY+36);
     this.graphics.strokePath();
 
     // Joystick marker
     this.graphics.fillStyle(0x00ffcc, 0.9);
-    this.graphics.fillCircle(this.joystickX, this.joystickY, 14);
+    this.graphics.fillCircle(this.joystickX, this.joystickY, 18);
     this.graphics.lineStyle(2, 0xffffff);
-    this.graphics.strokeCircle(this.joystickX, this.joystickY, 14);
+    this.graphics.strokeCircle(this.joystickX, this.joystickY, 18);
   }
 
   private showSuccess() {
     const { width: W, height: H } = this.scale;
     this.add.text(W/2, H/2, '✓ Navigation Stable!', {
-      fontSize: '34px', color: '#00ff88', stroke: '#000', strokeThickness: 4, fontFamily: 'Arial',
+      fontSize: '38px', color: '#00ff88', stroke: '#000', strokeThickness: 4, fontFamily: 'Arial',
     }).setOrigin(0.5);
     this.time.delayedCall(1200, () => {
       this.gameScene.completeTask(this.taskId);

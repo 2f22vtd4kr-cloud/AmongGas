@@ -229,21 +229,27 @@ export class MenuScene extends Phaser.Scene {
     const page = Phaser.Math.Clamp(this.helpPage, 0, 8);
     fitCover(this.add.image(W/2, H/2, `help_${page + 1}`), W, H);
 
-    const prevBtn = this.add.text(40, H/2, '◀', {
-      fontSize: '48px', color: '#fff', backgroundColor: '#0006',
-      padding: { x: 10, y: 5 },
+    const prevBtn = this.add.text(20, H/2, '◀', {
+      fontSize: '52px', color: '#fff', backgroundColor: '#0008',
+      padding: { x: 16, y: 14 },
     }).setInteractive();
-    const nextBtn = this.add.text(W - 80, H/2, '▶', {
-      fontSize: '48px', color: '#fff', backgroundColor: '#0006',
-      padding: { x: 10, y: 5 },
-    }).setInteractive();
+    const nextBtn = this.add.text(W - 20, H/2, '▶', {
+      fontSize: '52px', color: '#fff', backgroundColor: '#0008',
+      padding: { x: 16, y: 14 },
+    }).setOrigin(1, 0.5).setInteractive();
 
     prevBtn.on('pointerdown', () => { if (this.helpPage > 0) { this.helpPage--; this.renderHelp(); } });
     nextBtn.on('pointerdown', () => { if (this.helpPage < 8) { this.helpPage++; this.renderHelp(); } });
 
-    this.add.text(W/2, H - 30, 'ESC / Back to return', {
-      fontSize: '18px', color: '#aaa',
-    }).setOrigin(0.5);
+    // Back button — touch-friendly, works without keyboard
+    const backBtn = this.add.text(W/2, H - 30, '✕  Back', {
+      fontSize: '24px', color: '#fff', backgroundColor: '#0008',
+      padding: { x: 20, y: 14 },
+    }).setOrigin(0.5, 1).setInteractive();
+    backBtn.on('pointerdown', () => {
+      if (this.cache.audio.exists('sfx_go_back')) this.sound.play('sfx_go_back', { volume: 0.6 });
+      this.scene.restart();
+    });
 
     this.input.keyboard!.once('keydown-ESC', () => {
       if (this.cache.audio.exists('sfx_go_back')) this.sound.play('sfx_go_back', { volume: 0.6 });
@@ -259,14 +265,19 @@ export class MenuScene extends Phaser.Scene {
       if (this.cache.audio.exists('sfx_go_back')) this.sound.play('sfx_go_back', { volume: 0.6 });
       this.scene.restart();
     });
-    this.add.text(W/2, H - 30, 'ESC to return', {
-      fontSize: '18px', color: '#aaa',
-    }).setOrigin(0.5).setInteractive().on('pointerdown', () => this.scene.restart());
+    const credBack = this.add.text(W/2, H - 30, '✕  Back', {
+      fontSize: '24px', color: '#fff', backgroundColor: '#0008',
+      padding: { x: 20, y: 14 },
+    }).setOrigin(0.5, 1).setInteractive();
+    credBack.on('pointerdown', () => {
+      if (this.cache.audio.exists('sfx_go_back')) this.sound.play('sfx_go_back', { volume: 0.6 });
+      this.scene.restart();
+    });
   }
 
   private showNotice(msg: string) {
     const { width: W, height: H } = this.scale;
-    const box = this.add.rectangle(W/2, H/2, 500, 200, 0x000000, 0.85);
+    const box = this.add.rectangle(W/2, H/2, Math.min(W * 0.85, 500), 200, 0x000000, 0.85);
     const t = this.add.text(W/2, H/2 - 20, msg, {
       fontSize: '24px', color: '#fff', fontFamily: 'Arial', wordWrap: { width: 460 },
     }).setOrigin(0.5);
