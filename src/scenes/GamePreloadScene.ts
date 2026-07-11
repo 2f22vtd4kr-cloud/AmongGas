@@ -168,6 +168,10 @@ export class GamePreloadScene extends Phaser.Scene {
     this.load.image('light_mask', 'Assets/Images/Environment/light_350_med.png');
 
     // ── Audio (essential only — skip 31 MB ambience) ─────────────
+    // NOTE: menu UI sounds + menu music are already loaded by PreloadScene.
+    //       Phaser skips re-loading keys that are already in the cache,
+    //       so it is safe to list them here too — but we omit them to
+    //       keep the progress bar accurate.
     // General game sounds (~8 MB)
     this.load.audio('sfx_roundstart',   'Assets/Sounds/General/roundstart.wav');
     this.load.audio('sfx_emergency',    'Assets/Sounds/General/alarm_emergencymeeting.wav');
@@ -178,19 +182,10 @@ export class GamePreloadScene extends Phaser.Scene {
     this.load.audio('sfx_vent',         'Assets/Sounds/General/vent.wav');
     // Kill (~748 KB)
     this.load.audio('sfx_kill', 'Assets/Sounds/Kill/imposter_kill.wav');
-    // UI sounds (~1.2 MB)
-    this.load.audio('sfx_menu_sel',  'Assets/Sounds/UI/select.wav');
-    this.load.audio('sfx_go_back',   'Assets/Sounds/UI/back2.wav');
-    this.load.audio('sfx_selected',  'Assets/Sounds/UI/selected2.wav');
-    this.load.audio('sfx_keypress',  'Assets/Sounds/UI/keypress.wav');
-    this.load.audio('sfx_backspace', 'Assets/Sounds/UI/backspace.wav');
-    this.load.audio('sfx_map_click', 'Assets/Sounds/UI/map_btn_click.wav');
     // Footsteps (~284 KB)
     for (let i = 1; i <= 8; i++) {
       this.load.audio(`sfx_step_${i}`, `Assets/Sounds/Footsteps/Footstep0${i}.wav`);
     }
-    // Menu music (~9.7 MB) — loaded here so it can play on return to menu
-    this.load.audio('sfx_menu_music', 'Assets/Sounds/Background/main_menu_music.mp3');
     // NOTE: Ambience (31 MB) intentionally omitted — lazy-load per room if needed
   }
 

@@ -6,7 +6,8 @@ export class PreloadScene extends Phaser.Scene {
   }
 
   preload() {
-    // Only load the small set of images the menu needs — keeps initial load < 500 KB
+    // Loads menu images + all menu audio so MenuScene works immediately on first visit.
+    // GamePreloadScene skips these keys (already cached) and loads heavier game assets.
     this.load.on('progress', (v: number) => {
       const bar = document.getElementById('loading-bar');
       const txt = document.getElementById('loading-text');
@@ -34,6 +35,17 @@ export class PreloadScene extends Phaser.Scene {
     for (let i = 1; i <= 9; i++) {
       this.load.image(`help_${i}`, `Assets/Images/help/help${i}.png`);
     }
+
+    // ── Menu audio — must load here so MenuScene works on first visit ─
+    // UI click sounds (~1.2 MB total)
+    this.load.audio('sfx_menu_sel',  'Assets/Sounds/UI/select.wav');
+    this.load.audio('sfx_go_back',   'Assets/Sounds/UI/back2.wav');
+    this.load.audio('sfx_selected',  'Assets/Sounds/UI/selected2.wav');
+    this.load.audio('sfx_keypress',  'Assets/Sounds/UI/keypress.wav');
+    this.load.audio('sfx_backspace', 'Assets/Sounds/UI/backspace.wav');
+    this.load.audio('sfx_map_click', 'Assets/Sounds/UI/map_btn_click.wav');
+    // Menu music (~9.7 MB) — needed immediately when MenuScene starts
+    this.load.audio('sfx_menu_music', 'Assets/Sounds/Background/main_menu_music.mp3');
   }
 
   create() {

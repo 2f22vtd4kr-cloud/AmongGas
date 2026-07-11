@@ -71,8 +71,8 @@ export class MenuScene extends Phaser.Scene {
     keys.on('keydown-ENTER', () => this.selectMainItem(this.cursorIdx));
     keys.on('keydown-SPACE', () => this.selectMainItem(this.cursorIdx));
 
-    // Music
-    if (!this.sound.get('sfx_menu_music')?.isPlaying) {
+    // Music — guard against key being absent (should be loaded by PreloadScene)
+    if (this.cache.audio.exists('sfx_menu_music') && !this.sound.get('sfx_menu_music')?.isPlaying) {
       this.music = this.sound.add('sfx_menu_music', { loop: true, volume: 0.5 });
       this.music.play();
     }
@@ -81,7 +81,7 @@ export class MenuScene extends Phaser.Scene {
   private navigate(dir: -1 | 1) {
     this.cursorIdx = Phaser.Math.Clamp(this.cursorIdx + dir, 0, 4);
     this.moveCursor();
-    this.sound.play('sfx_menu_sel', { volume: 0.6 });
+    if (this.cache.audio.exists('sfx_menu_sel')) this.sound.play('sfx_menu_sel', { volume: 0.6 });
   }
 
   private moveCursor() {
@@ -92,7 +92,7 @@ export class MenuScene extends Phaser.Scene {
   }
 
   private selectMainItem(idx: number) {
-    this.sound.play('sfx_selected', { volume: 0.7 });
+    if (this.cache.audio.exists('sfx_selected')) this.sound.play('sfx_selected', { volume: 0.7 });
     switch (idx) {
       case 0: // Freeplay
         this.registry.set('gameMode', 'Freeplay');
@@ -126,18 +126,18 @@ export class MenuScene extends Phaser.Scene {
         this.playerColor = color;
         this.registry.set('playerColor', color);
         this.showNameInput();
-        this.sound.play('sfx_selected', { volume: 0.7 });
+        if (this.cache.audio.exists('sfx_selected')) this.sound.play('sfx_selected', { volume: 0.7 });
       });
       btn.on('pointerover', () => {
         btn.setScale(1.1);
-        this.sound.play('sfx_menu_sel', { volume: 0.5 });
+        if (this.cache.audio.exists('sfx_menu_sel')) this.sound.play('sfx_menu_sel', { volume: 0.5 });
       });
       btn.on('pointerout', () => btn.setScale(1));
     }
 
     // Keyboard nav
     this.input.keyboard!.once('keydown-ESC', () => {
-      this.sound.play('sfx_go_back', { volume: 0.6 });
+      if (this.cache.audio.exists('sfx_go_back')) this.sound.play('sfx_go_back', { volume: 0.6 });
       this.scene.restart();
     });
   }
@@ -170,7 +170,7 @@ export class MenuScene extends Phaser.Scene {
     this.nameInputEl.addEventListener('input', () => {
       this.playerName = this.nameInputEl!.value.slice(0, 11);
       if (this.nameText) this.nameText.setText(this.playerName);
-      this.sound.play('sfx_keypress', { volume: 0.5 });
+      if (this.cache.audio.exists('sfx_keypress')) this.sound.play('sfx_keypress', { volume: 0.5 });
     });
     this.nameInputEl.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && this.playerName.length > 0) {
@@ -225,7 +225,7 @@ export class MenuScene extends Phaser.Scene {
     }).setOrigin(0.5);
 
     this.input.keyboard!.once('keydown-ESC', () => {
-      this.sound.play('sfx_go_back', { volume: 0.6 });
+      if (this.cache.audio.exists('sfx_go_back')) this.sound.play('sfx_go_back', { volume: 0.6 });
       this.scene.restart();
     });
   }
@@ -235,7 +235,7 @@ export class MenuScene extends Phaser.Scene {
     this.clearScene();
     this.add.image(W/2, H/2, 'credits_img').setDisplaySize(W, H);
     this.input.keyboard!.once('keydown-ESC', () => {
-      this.sound.play('sfx_go_back', { volume: 0.6 });
+      if (this.cache.audio.exists('sfx_go_back')) this.sound.play('sfx_go_back', { volume: 0.6 });
       this.scene.restart();
     });
     this.add.text(W/2, H - 30, 'ESC to return', {
