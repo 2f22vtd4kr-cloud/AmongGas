@@ -133,8 +133,15 @@ Browser loads index.html
 - Dead body sprites now work: `Player.die()` / `Bot.die()` call `setTexture('dead_${lc}')` which now resolves to the recolored canvas texture
 - `victory_crew.wav` and `victory_impostor.wav` confirmed to exist in Assets (earlier note was wrong)
 
+### Session 4 (2026-07-11)
+- Discovered root cause of wrong colors: Assets/ already has real sprite files for all 10 colors; runtime pixel-recoloring was unnecessary and produced incorrect results (yellow/white/black especially wrong)
+- Rewrote `GamePreloadScene.ts` to load actual artwork directly:
+  - Full-animation colors (18 frames + ghost): Red, Blue, Green, Orange, Yellow
+  - Basic colors (1 frame, no ghost): Black, Brown, Pink, Purple, White
+  - Dead body sprites loaded from `Assets/Images/Player/Dead/Dead{color}.png` for all 10 colors
+- Removed all `SpriteRecolor.ts` / `recolorCanvas` usage from `GamePreloadScene.ts`
+- `SpriteRecolor.ts` left in place but no longer imported
+
 ### Next Session Priorities
-1. Visual verification: enter Freeplay, walk bots around, verify non-Red colors look correct and shadows are plausible
-2. Kill a bot (or wait for impostor to kill) and verify the dead body sprite shows the right color
-3. If recolor fidelity is off (e.g., yellow appears wrong because yellow is BOTH R and G dominant), tune thresholds in `SpriteRecolor.ts`
-4. Consider lazy-loading ambient sounds per room (31 MB currently omitted)
+1. Consider lazy-loading ambient sounds per room (31 MB currently omitted)
+2. Test multiplayer (LOCAL) path

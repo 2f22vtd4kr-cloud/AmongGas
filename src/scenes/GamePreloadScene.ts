@@ -1,22 +1,28 @@
 /**
  * GamePreloadScene — loads all heavy game assets after the menu.
  *
- * Sprite strategy (no-duplicate-files approach):
- *   Only the Red player sprites are loaded from disk. Every other color
- *   is generated in create() via recolorCanvas(), which remaps the
- *   red-dominant pixels to the chosen player color while leaving black
- *   outlines, the white visor, and all other details unchanged. Each
- *   recolored canvas is registered with scene.textures.addCanvas() so
- *   the rest of the codebase uses the exact same texture-key pattern
- *   (e.g. "blue_down_1", "dead_green") as before.
+ * Sprite strategy: load actual artwork from Assets/ for every color.
+ *
+ *   Full animation colors (18 walk frames + ghost): Red, Blue, Green, Orange, Yellow
+ *   Single-frame colors (1 walk frame, no ghost):   Black, Brown, Pink, Purple, White
+ *
+ * Texture key conventions (same as the rest of the codebase):
+ *   walk  → "${lc}_${dir}_${f}"   e.g. "blue_down_1"
+ *   ghost → "${lc}_ghost_1" / "${lc}_ghost_2"
+ *   dead  → "dead_${lc}"          e.g. "dead_blue"
  */
 import Phaser from 'phaser';
-import { ALL_COLORS } from '../settings';
-import { recolorCanvas, PLAYER_COLORS } from '../utils/SpriteRecolor';
 
-const WALK_DIRS  = ['down', 'left', 'right', 'up'] as const;
-/** Number of walk frames per direction in the Red base set (step1 … step17). */
-const BASE_WALK_FRAMES = 17;
+const WALK_DIRS = ['down', 'left', 'right', 'up'] as const;
+
+/** Colors that have 18 walk frames and ghost sprites in Assets/. */
+const FULL_COLORS  = ['red', 'blue', 'green', 'orange', 'yellow'] as const;
+/** Colors that have only 1 walk frame and no ghost sprite in Assets/. */
+const BASIC_COLORS = ['black', 'brown', 'pink', 'purple', 'white'] as const;
+const ALL_COLORS   = [...FULL_COLORS, ...BASIC_COLORS] as const;
+
+/** Capitalises the first letter to match the Asset folder names (e.g. "blue" → "Blue"). */
+const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
 export class GamePreloadScene extends Phaser.Scene {
   private barFill!: Phaser.GameObjects.Rectangle;
@@ -51,18 +57,38 @@ export class GamePreloadScene extends Phaser.Scene {
     this.load.text('map_tmx',  'Assets/Maps/map_final.backv2.tmx');
     this.load.image('minimap', 'Assets/Maps/mini_map3.png');
 
-    // ── Player sprites — Red base only ───────────────────────────
-    // All other colors are pixel-recolored from these in create().
-    for (const dir of WALK_DIRS) {
-      for (let f = 1; f <= BASE_WALK_FRAMES; f++) {
-        this.load.image(`red_${dir}_${f}`,
-          `Assets/Images/Player/Red/red_${dir}_walk/step${f}.png`);
+    // ── Player walk sprites ───────────────────────────────────────
+    // Full-animation colors: 18 frames × 4 directions
+    for (const lc of FULL_COLORS) {
+      const C = cap(lc);
+      for (const dir of WALK_DIRS) {
+        for (let f = 1; f <= 18; f++) {
+          this.load.image(
+            `${lc}_${dir}_${f}`,
+            `Assets/Images/Player/${C}/${lc}_${dir}_walk/step${f}.png`,
+          );
+        }
+      }
+      // Ghost frames
+      this.load.image(`${lc}_ghost_1`, `Assets/Images/Player/${C}/${lc}_ghost/step1_left.png`);
+      this.load.image(`${lc}_ghost_2`, `Assets/Images/Player/${C}/${lc}_ghost/step1_right.png`);
+    }
+
+    // Basic colors: 1 frame × 4 directions (same frame reused across animation)
+    for (const lc of BASIC_COLORS) {
+      const C = cap(lc);
+      for (const dir of WALK_DIRS) {
+        this.load.image(
+          `${lc}_${dir}_1`,
+          `Assets/Images/Player/${C}/${lc}_${dir}_walk/step1.png`,
+        );
       }
     }
-    this.load.image('red_ghost_1', 'Assets/Images/Player/Red/red_ghost/step1_left.png');
-    this.load.image('red_ghost_2', 'Assets/Images/Player/Red/red_ghost/step1_right.png');
-    // Dead body base — note actual filename uses Title+lowercase (Deadred.png)
-    this.load.image('dead_red', 'Assets/Images/Player/Dead/Deadred.png');
+
+    // ── Dead body sprites ─────────────────────────────────────────
+    for (const lc of ALL_COLORS) {
+      this.load.image(`dead_${lc}`, `Assets/Images/Player/Dead/Dead${lc}.png`);
+    }
 
     // Kill animation frames
     for (let i = 1; i <= 3; i++) {
@@ -181,7 +207,6 @@ export class GamePreloadScene extends Phaser.Scene {
     this.load.image('light_mask', 'Assets/Images/Environment/light_350_med.png');
 
     // ── Audio ─────────────────────────────────────────────────────
-    // Menu UI sounds are already in PreloadScene; Phaser skips re-loads.
     this.load.audio('sfx_roundstart',   'Assets/Sounds/General/roundstart.wav');
     this.load.audio('sfx_emergency',    'Assets/Sounds/General/alarm_emergencymeeting.wav');
     this.load.audio('sfx_report',       'Assets/Sounds/General/report_Bodyfound.wav');
@@ -196,32 +221,35 @@ export class GamePreloadScene extends Phaser.Scene {
   }
 
   create() {
-    // ── 1. Generate recolored variants for every non-Red player color ─
-    this.pctText.setText('Generating character sprites…');
-    this.generateColorVariants();
-
-    // ── 2. Build walk + idle animations for ALL 12 colors ─────────────
-    for (const color of ALL_COLORS) {
-      const lc = color.toLowerCase();
+    // ── Build walk + idle animations for all colors ───────────────
+    for (const lc of FULL_COLORS) {
       for (const dir of WALK_DIRS) {
-        const frameArr: Phaser.Types.Animations.AnimationFrame[] = [];
-        for (let f = 1; f <= BASE_WALK_FRAMES; f++) {
+        const frames = [];
+        for (let f = 1; f <= 18; f++) {
           const key = `${lc}_${dir}_${f}`;
-          if (this.textures.exists(key)) frameArr.push({ key });
+          if (this.textures.exists(key)) frames.push({ key });
         }
-        if (frameArr.length === 0) continue;
+        if (frames.length === 0) continue;
         try {
-          this.anims.create({
-            key: `${lc}_walk_${dir}`, frames: frameArr, frameRate: 12, repeat: -1,
-          });
-          this.anims.create({
-            key: `${lc}_idle_${dir}`, frames: [frameArr[0]], frameRate: 1, repeat: 0,
-          });
-        } catch (_) { /* ignore if already registered */ }
+          this.anims.create({ key: `${lc}_walk_${dir}`, frames, frameRate: 12, repeat: -1 });
+          this.anims.create({ key: `${lc}_idle_${dir}`, frames: [frames[0]], frameRate: 1, repeat: 0 });
+        } catch (_) {}
       }
     }
 
-    // ── 3. Kill animation ──────────────────────────────────────────────
+    for (const lc of BASIC_COLORS) {
+      for (const dir of WALK_DIRS) {
+        const key = `${lc}_${dir}_1`;
+        if (!this.textures.exists(key)) continue;
+        const frame = [{ key }];
+        try {
+          this.anims.create({ key: `${lc}_walk_${dir}`, frames: frame, frameRate: 1, repeat: -1 });
+          this.anims.create({ key: `${lc}_idle_${dir}`, frames: frame, frameRate: 1, repeat: 0 });
+        } catch (_) {}
+      }
+    }
+
+    // ── Kill animation ────────────────────────────────────────────
     const killFrames = [1, 2, 3]
       .map(i => `kill_anim_${i}`)
       .filter(k => this.textures.exists(k))
@@ -232,51 +260,5 @@ export class GamePreloadScene extends Phaser.Scene {
     }
 
     this.scene.start('GameScene');
-  }
-
-  /**
-   * For each non-Red player color: pixel-remap every walk frame, both ghost
-   * frames, and the dead-body sprite, then register each as a Phaser texture.
-   *
-   * Player.ts and Bot.ts use the keys produced here:
-   *   walk  → "${lc}_${dir}_${f}"   e.g. "blue_down_1"
-   *   ghost → "${lc}_ghost_1/2"
-   *   dead  → "dead_${lc}"          e.g. "dead_blue"
-   */
-  private generateColorVariants() {
-    const deadSrc = this.textures.exists('dead_red')
-      ? ((this.textures.get('dead_red').source[0] as unknown as { image: HTMLImageElement }).image)
-      : null;
-
-    for (const color of ALL_COLORS) {
-      const lc = color.toLowerCase();
-      if (lc === 'red') continue; // Red is the base — already loaded with correct keys
-
-      const target = PLAYER_COLORS[lc];
-      if (!target) continue;
-
-      // Walk frames — all 4 directions
-      for (const dir of WALK_DIRS) {
-        for (let f = 1; f <= BASE_WALK_FRAMES; f++) {
-          const baseKey = `red_${dir}_${f}`;
-          if (!this.textures.exists(baseKey)) continue;
-          const src = (this.textures.get(baseKey).source[0] as unknown as { image: HTMLImageElement }).image;
-          this.textures.addCanvas(`${lc}_${dir}_${f}`, recolorCanvas(src, target));
-        }
-      }
-
-      // Ghost frames
-      for (const gf of [1, 2] as const) {
-        const baseKey = `red_ghost_${gf}`;
-        if (!this.textures.exists(baseKey)) continue;
-        const src = (this.textures.get(baseKey).source[0] as unknown as { image: HTMLImageElement }).image;
-        this.textures.addCanvas(`${lc}_ghost_${gf}`, recolorCanvas(src, target));
-      }
-
-      // Dead body
-      if (deadSrc) {
-        this.textures.addCanvas(`dead_${lc}`, recolorCanvas(deadSrc, target));
-      }
-    }
   }
 }
