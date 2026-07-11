@@ -12,6 +12,7 @@
  *   dead  → "dead_${lc}"          e.g. "dead_blue"
  */
 import Phaser from 'phaser';
+import { fixRedSprite } from '../utils/SpriteRecolor';
 
 const WALK_DIRS = ['down', 'left', 'right', 'up'] as const;
 
@@ -241,6 +242,25 @@ export class GamePreloadScene extends Phaser.Scene {
   }
 
   create() {
+    // ── Fix Red sprites: replace blue backpack + green visor ──────
+    // Red's artwork is inconsistent with all other colors (blue backpack,
+    // green visor). Apply fixRedSprite to every Red texture so it looks
+    // like the rest of the cast: solid red body + white/grey visor.
+    const RED_WALK_KEYS: string[] = [];
+    for (const dir of WALK_DIRS) {
+      for (let f = 1; f <= 18; f++) RED_WALK_KEYS.push(`red_${dir}_${f}`);
+    }
+    RED_WALK_KEYS.push('red_ghost_1', 'red_ghost_2', 'dead_red');
+
+    for (const key of RED_WALK_KEYS) {
+      if (!this.textures.exists(key)) continue;
+      const src = (this.textures.get(key).source[0] as unknown as { image: HTMLImageElement }).image;
+      if (!src) continue;
+      const fixed = fixRedSprite(src);
+      this.textures.remove(key);
+      this.textures.addCanvas(key, fixed);
+    }
+
     // ── Build walk + idle animations for all colors ───────────────
     for (const lc of FULL_COLORS) {
       for (const dir of WALK_DIRS) {

@@ -55,6 +55,63 @@ export function shadowOf([r, g, b]: RGB): RGB {
  * Returns a new HTMLCanvasElement ready for `textures.addCanvas()`.
  * The recolored canvas is cached by the caller — call once per color+frame.
  */
+/**
+ * Fix the Red sprite artwork specifically: the Red sprites in Assets/ have a
+ * blue backpack and a green visor — inconsistent with every other color which
+ * has a matching backpack and a white/grey visor.
+ *
+ * This pass replaces:
+ *  • Blue-dominant pixels (backpack) → red, brightness-scaled
+ *  • Green-dominant pixels (visor)   → white/grey (#D8E0EB), brightness-scaled
+ *  • Everything else (red body, black outlines, white highlights) → unchanged
+ *
+ * Returns a new HTMLCanvasElement ready for textures.addCanvas().
+ */
+export function fixRedSprite(
+  src: HTMLImageElement | HTMLCanvasElement,
+): HTMLCanvasElement {
+  const w = ('naturalWidth'  in src ? src.naturalWidth  : src.width)  || 1;
+  const h = ('naturalHeight' in src ? src.naturalHeight : src.height) || 1;
+
+  const out = document.createElement('canvas');
+  out.width  = w;
+  out.height = h;
+
+  const ctx = out.getContext('2d')!;
+  ctx.drawImage(src, 0, 0);
+
+  const id = ctx.getImageData(0, 0, w, h);
+  const d  = id.data;
+
+  // Target visor colour — matches the white/grey visor on all other characters
+  const VISOR: RGB = [216, 224, 240];
+
+  for (let i = 0; i < d.length; i += 4) {
+    const r = d[i], g = d[i + 1], b = d[i + 2], a = d[i + 3];
+    if (a < 10) continue;
+
+    if (b > r + 60 && b > g + 40) {
+      // Blue-dominant → backpack → remap to red, scaling brightness from b
+      // reference max backpack blue ≈ 210
+      const br = b / 210;
+      d[i]     = Math.min(255, (197 * br + 0.5) | 0); // red body reference = 197
+      d[i + 1] = Math.min(255, ( 17 * br + 0.5) | 0);
+      d[i + 2] = Math.min(255, ( 17 * br + 0.5) | 0);
+    } else if (g > r + 50 && g > b + 40) {
+      // Green-dominant → visor → remap to white/grey, scaling from g
+      // reference max visor green ≈ 200
+      const br = g / 200;
+      d[i]     = Math.min(255, (VISOR[0] * br + 0.5) | 0);
+      d[i + 1] = Math.min(255, (VISOR[1] * br + 0.5) | 0);
+      d[i + 2] = Math.min(255, (VISOR[2] * br + 0.5) | 0);
+    }
+    // Otherwise: red body, black outlines, white highlights → unchanged
+  }
+
+  ctx.putImageData(id, 0, 0);
+  return out;
+}
+
 export function recolorCanvas(
   src: HTMLImageElement | HTMLCanvasElement,
   target: RGB,
