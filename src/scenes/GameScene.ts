@@ -325,10 +325,10 @@ export class GameScene extends Phaser.Scene {
       this.toggleMiniMap();
     });
 
-    // ── Contextual action buttons — bottom-right, stacked vertically for
-    // comfortable thumb reach. Shifted up by safe-area bottom inset so they
-    // clear the home bar on notched phones.
-    const actionX = W - 60;
+    // ── Contextual action buttons — bottom-left, stacked vertically
+    // (joystick moved to right, so actions live on the left).
+    // Shifted up by safe-area bottom inset so they clear the home bar.
+    const actionX = 60;
     const sb = this.safeBot;
     this.killBtn = this.buildActionButton(actionX, H - 300 - sb, 46, 0xff2222, '🔪', () => this.attemptKill());
     this.killBtn.setVisible(false);
@@ -385,7 +385,7 @@ export class GameScene extends Phaser.Scene {
 
   private setupJoystick() {
     const jSize = 80;
-    const jx = 130;
+    const jx = this.scale.width - 130;   // right side
     // Shift joystick up by safe-area bottom inset (home bar on iPhone etc.)
     const jy = this.scale.height - 170 - this.safeBot;
     this.joystickBase = this.add.arc(jx, jy, jSize, 0, 360, false, 0x444444, 0.5)
@@ -395,8 +395,8 @@ export class GameScene extends Phaser.Scene {
 
     this.input.on('pointerdown', (p: Phaser.Input.Pointer) => {
       const W = this.scale.width, H = this.scale.height;
-      // Bottom-left zone → joystick
-      const inMovementZone = p.x < W * 0.55 && p.y > H * 0.35;
+      // Bottom-right zone → joystick
+      const inMovementZone = p.x > W * 0.45 && p.y > H * 0.35;
       if (inMovementZone) {
         this.joystickActive = true;
         this.joystickStart = { x: p.x, y: p.y };
@@ -444,7 +444,7 @@ export class GameScene extends Phaser.Scene {
   private handleActionButtonTap(px: number, py: number) {
     if (!this.player.isAlive || this.gameOver) return;
     const W = this.scale.width, H = this.scale.height;
-    const actionX = W - 60;
+    const actionX = 60;   // mirrored to left side with joystick on right
     const sb = this.safeBot;
     const tapR = 68; // generous finger radius
 
