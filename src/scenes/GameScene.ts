@@ -4,7 +4,7 @@ import { Bot } from '../objects/Bot';
 import {
   BOT_POS, ALL_COLORS, PLAYER_SPAWN, WORLD_WIDTH, WORLD_HEIGHT,
   INTERACT_RADIUS, KILL_RADIUS, REPORT_RADIUS, NO_OF_MISSIONS,
-  AMBIENT_CENTRES, TASK_TITLES,
+  AMBIENT_CENTRES, TASK_TITLES, CAMERA_ZOOM,
 } from '../settings';
 import type { TaskDef, BotData } from '../types';
 import { parseTmx } from '../utils/TmxParser';
@@ -37,11 +37,17 @@ export class GameScene extends Phaser.Scene {
   private emergencyPos = { x: 3257, y: 655 };
 
   // --- UI overlay ---
+  // A second, unzoomed camera dedicated to HUD/UI. Camera zoom/rotation on
+  // the main (world) camera still applies to scrollFactor(0) objects, so
+  // without this the HUD would get dragged off-screen by CAMERA_ZOOM.
+  private uiCamera!: Phaser.Cameras.Scene2D.Camera;
   private hud!: Phaser.GameObjects.Container;
   private taskBarFill!: Phaser.GameObjects.Rectangle;
   private taskLabel!: Phaser.GameObjects.Text;
   private interactPrompt!: Phaser.GameObjects.Text;
-  private killBtn!: Phaser.GameObjects.Text;
+  private killBtn!: Phaser.GameObjects.Container;
+  private useBtn!: Phaser.GameObjects.Container;
+  private reportBtn!: Phaser.GameObjects.Container;
   private emergencyBtn!: Phaser.GameObjects.Text;
   private miniMapBtn!: Phaser.GameObjects.Image;
   private miniMapOverlay?: Phaser.GameObjects.Container;
@@ -131,7 +137,10 @@ export class GameScene extends Phaser.Scene {
     this.physics.world.setBounds(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
     this.cameras.main.setBounds(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
     this.cameras.main.startFollow(this.player, true, 0.12, 0.12);
-    this.cameras.main.setZoom(1.0);
+    // Portrait viewport is narrower than the original landscape frame, so we
+    // zoom in a bit to keep the player readable while still showing enough
+    // of the surrounding room. Tuned for the 750x1334 base design size.
+    this.cameras.main.setZoom(CAMERA_ZOOM);
 
     // ── Input ──
     this.cursors = this.input.keyboard!.createCursorKeys();
@@ -153,6 +162,9 @@ export class GameScene extends Phaser.Scene {
 
     // ── HUD ──
     this.buildHUD();
+
+    // ── UI camera: renders the HUD without the main camera's zoom/scroll ──
+    this.setupUiCamera();
 
     // ── Round start sound ──
     this.time.delayedCall(800, () => {
@@ -263,27 +275,21 @@ export class GameScene extends Phaser.Scene {
     }).setOrigin(0.5, 0);
     this.hud.add([barBg, barBorder, this.taskBarFill, this.taskLabel]);
 
-    // Interact prompt (bottom center)
-    this.interactPrompt = this.add.text(W / 2, H - 40, '', {
+    // Interact prompt — sits just above the action button stack so it never
+    // overlaps a thumb resting on the buttons below it.
+    this.interactPrompt = this.add.text(W / 2, H - 210, '', {
       fontSize: '18px', color: '#ffff00', stroke: '#000', strokeThickness: 4, fontFamily: 'Arial',
     }).setOrigin(0.5).setScrollFactor(0).setDepth(101).setVisible(false);
 
-    // Emergency meeting button (bottom left)
-    this.emergencyBtn = this.add.text(20, H - 60, '🚨 EMERGENCY\nMEETING', {
-      fontSize: '15px', color: '#ff4444', backgroundColor: '#22000077',
-      padding: { x: 8, y: 6 }, fontFamily: 'Arial', align: 'center',
+    // Emergency meeting button — top-left, out of the way of the thumb zones
+    // used for movement (bottom-left) and actions (bottom-right).
+    this.emergencyBtn = this.add.text(16, 64, '🚨 MEETING', {
+      fontSize: '14px', color: '#ff4444', backgroundColor: '#22000099',
+      padding: { x: 10, y: 8 }, fontFamily: 'Arial', align: 'center',
     }).setScrollFactor(0).setDepth(101).setInteractive({ useHandCursor: true });
     this.emergencyBtn.on('pointerdown', () => this.triggerEmergency(false));
 
-    // Kill button (bottom right) — visible only for impostor in non-freeplay
-    this.killBtn = this.add.text(W - 20, H - 60, '🔪 KILL', {
-      fontSize: '18px', color: '#ff2222', backgroundColor: '#33000099',
-      padding: { x: 10, y: 8 }, fontFamily: 'Arial',
-    }).setOrigin(1, 0).setScrollFactor(0).setDepth(101)
-      .setInteractive({ useHandCursor: true }).setVisible(false);
-    this.killBtn.on('pointerdown', () => this.attemptKill());
-
-    // Mini-map button
+    // Mini-map button (top-right)
     this.miniMapBtn = this.add.image(W - 48, 48, 'ui_map_button')
       .setScrollFactor(0).setDepth(101).setDisplaySize(56, 56)
       .setInteractive({ useHandCursor: true });
@@ -292,32 +298,78 @@ export class GameScene extends Phaser.Scene {
       this.toggleMiniMap();
     });
 
-    // E interact button (touch)
-    const eBtn = this.add.text(W - 90, H - 60, '[ E ]', {
-      fontSize: '20px', color: '#88ff88', backgroundColor: '#00000077',
-      padding: { x: 10, y: 8 }, fontFamily: 'Arial',
-    }).setScrollFactor(0).setDepth(101).setInteractive({ useHandCursor: true });
-    eBtn.on('pointerdown', () => this.tryInteract());
+    // ── Contextual action buttons — bottom-right, stacked vertically for
+    // comfortable thumb reach. Larger touch targets than the old inline
+    // text buttons; each is shown/hidden based on game state in detectNearby().
+    const actionX = W - 60;
+    this.killBtn = this.buildActionButton(actionX, H - 300, 46, 0xff2222, '🔪', () => this.attemptKill());
+    this.killBtn.setVisible(false); // player-impostor mode not enabled in Freeplay yet
 
-    // R report button
-    const rBtn = this.add.text(W - 160, H - 60, '[ R ]', {
-      fontSize: '20px', color: '#ff8888', backgroundColor: '#00000077',
-      padding: { x: 10, y: 8 }, fontFamily: 'Arial',
-    }).setScrollFactor(0).setDepth(101).setInteractive({ useHandCursor: true });
-    rBtn.on('pointerdown', () => this.tryReport());
+    this.reportBtn = this.buildActionButton(actionX, H - 180, 46, 0xff8888, '🚩', () => this.tryReport());
+    this.reportBtn.setVisible(false);
+
+    this.useBtn = this.buildActionButton(actionX, H - 60, 52, 0x88ff88, '✋', () => this.tryInteract());
+    this.useBtn.setVisible(false);
+  }
+
+  /**
+   * Registers a second camera dedicated to HUD/UI rendering. Phaser applies
+   * the main camera's zoom and scroll to *every* object on it, including
+   * ones with setScrollFactor(0) — so once CAMERA_ZOOM > 1 the HUD would be
+   * dragged off-screen if it stayed on the main camera. Instead the main
+   * (zoomed, world-following) camera ignores all HUD objects, and this
+   * unzoomed UI camera ignores everything else, so each camera renders only
+   * its own layer.
+   */
+  private setupUiCamera() {
+    const { width: W, height: H } = this.scale;
+    this.uiCamera = this.cameras.add(0, 0, W, H);
+
+    const hudObjects: Phaser.GameObjects.GameObject[] = [
+      this.hud, this.emergencyBtn, this.miniMapBtn, this.interactPrompt,
+      this.killBtn, this.reportBtn, this.useBtn,
+    ];
+    if (this.joystickBase) hudObjects.push(this.joystickBase);
+    if (this.joystickThumb) hudObjects.push(this.joystickThumb);
+
+    this.cameras.main.ignore(hudObjects);
+    const hudSet = new Set(hudObjects);
+    this.uiCamera.ignore(this.children.list.filter((o) => !hudSet.has(o)));
+  }
+
+  /** A large circular touch button used for the bottom-right action stack. */
+  private buildActionButton(
+    x: number, y: number, radius: number, color: number, label: string, onTap: () => void,
+  ): Phaser.GameObjects.Container {
+    const circle = this.add.arc(0, 0, radius, 0, 360, false, 0x000000, 0.55)
+      .setStrokeStyle(2, color, 0.9);
+    const icon = this.add.text(0, 0, label, { fontSize: `${Math.round(radius * 0.9)}px` }).setOrigin(0.5);
+    const hitArea = new Phaser.Geom.Circle(0, 0, radius);
+    const container = this.add.container(x, y, [circle, icon])
+      .setScrollFactor(0).setDepth(101)
+      .setSize(radius * 2, radius * 2)
+      .setInteractive(hitArea, Phaser.Geom.Circle.Contains);
+    container.on('pointerdown', onTap);
+    return container;
   }
 
   // ────────────────── Virtual Joystick ──────────────────
 
   private setupJoystick() {
     const jSize = 80;
-    this.joystickBase = this.add.arc(100, this.scale.height - 100, jSize, 0, 360, false, 0x444444, 0.5)
+    const jx = 130;
+    const jy = this.scale.height - 170;
+    this.joystickBase = this.add.arc(jx, jy, jSize, 0, 360, false, 0x444444, 0.5)
       .setScrollFactor(0).setDepth(102).setStrokeStyle(2, 0x888888);
-    this.joystickThumb = this.add.arc(100, this.scale.height - 100, 32, 0, 360, false, 0x888888, 0.8)
+    this.joystickThumb = this.add.arc(jx, jy, 32, 0, 360, false, 0x888888, 0.8)
       .setScrollFactor(0).setDepth(103);
 
     this.input.on('pointerdown', (p: Phaser.Input.Pointer) => {
-      if (p.x < this.scale.width / 2) {
+      // Only claim taps in the bottom-left movement zone so this doesn't
+      // steal touches meant for the emergency button (top-left) or the
+      // action button stack (bottom-right).
+      const inMovementZone = p.x < this.scale.width * 0.55 && p.y > this.scale.height * 0.35;
+      if (inMovementZone) {
         this.joystickActive = true;
         this.joystickStart = { x: p.x, y: p.y };
         this.joystickBase?.setPosition(p.x, p.y);
@@ -421,17 +473,23 @@ export class GameScene extends Phaser.Scene {
     this.nearbyCorpse = closest.corpse;
 
     // Prompt
+    const nearEmergency = eDist < INTERACT_RADIUS * 1.5 && this.player.isAlive;
     if (this.nearbyTask) {
       this.interactPrompt
         .setText(`[E] ${this.nearbyTask.title}`)
         .setVisible(true);
-    } else if (eDist < INTERACT_RADIUS * 1.5 && this.player.isAlive) {
+    } else if (nearEmergency) {
       this.interactPrompt.setText('[E] Emergency Meeting').setVisible(true);
     } else if (this.nearbyCorpse) {
       this.interactPrompt.setText('[R] Report Body').setVisible(true);
     } else {
       this.interactPrompt.setVisible(false);
     }
+
+    // Contextual action buttons — only show the ones that are actionable
+    // right now, so the bottom-right thumb zone doesn't clutter the screen.
+    this.useBtn.setVisible(!!this.nearbyTask || nearEmergency);
+    this.reportBtn.setVisible(!!this.nearbyCorpse);
   }
 
   private tryInteract() {
@@ -512,6 +570,8 @@ export class GameScene extends Phaser.Scene {
           fontSize: '40px', color: '#ff2222', fontFamily: 'Arial',
         }).setOrigin(0.5).setScrollFactor(0).setDepth(201);
 
+    this.cameras.main.ignore([overlay, alertImg]);
+
     this.time.delayedCall(2500, () => {
       overlay.destroy();
       if ('destroy' in alertImg) (alertImg as Phaser.GameObjects.GameObject).destroy();
@@ -549,6 +609,7 @@ export class GameScene extends Phaser.Scene {
         fontSize: '32px', color: wasImp ? '#ff4444' : '#ffffff',
         backgroundColor: '#00000099', padding: { x: 20, y: 12 }, fontFamily: 'Arial',
       }).setOrigin(0.5).setScrollFactor(0).setDepth(200);
+      this.cameras.main.ignore(t);
       this.time.delayedCall(3000, () => t.destroy());
     }
     this.checkWinConditions();
@@ -655,6 +716,7 @@ export class GameScene extends Phaser.Scene {
     closeBtn.on('pointerdown', () => this.closeMiniMap());
 
     this.miniMapOverlay.add([bg, mapImg, dot, closeBtn]);
+    this.cameras.main.ignore(this.miniMapOverlay);
     this.input.keyboard!.once('keydown-M', () => this.closeMiniMap());
   }
 

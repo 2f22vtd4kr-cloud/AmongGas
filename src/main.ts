@@ -16,8 +16,8 @@ import { ClearAsteroidsScene } from './scenes/tasks/ClearAsteroidsScene';
 
 const config: Phaser.Types.Core.GameConfig = {
   type: Phaser.AUTO,
-  width: 1280,
-  height: 720,
+  width: 750,
+  height: 1334,
   parent: 'game-container',
   backgroundColor: '#1a0a2e',
   physics: {

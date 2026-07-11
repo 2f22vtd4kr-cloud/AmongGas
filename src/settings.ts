@@ -1,7 +1,8 @@
 // Game constants (ported from Python settings.py)
 
-export const WIDTH = 1280;
-export const HEIGHT = 720;
+// Base design resolution — portrait, mobile-first (Telegram Mini App target)
+export const WIDTH = 750;
+export const HEIGHT = 1334;
 export const FPS = 60;
 export const TILESIZE = 32;
 export const PLAYER_SPEED = 400;
@@ -29,6 +30,11 @@ export const BOT_POS: { x: number; y: number }[] = [
 
 export const PLAYER_COLORS = ['Red', 'Blue', 'Orange', 'Yellow', 'Green'];
 export const ALL_COLORS = ['Black', 'Blue', 'Brown', 'Green', 'Orange', 'Pink', 'Purple', 'Red', 'White', 'Yellow'];
+
+// Camera zoom for the portrait viewport — the frame is narrower than the
+// original landscape design, so we zoom in to keep the player and nearby
+// objects readable while still showing enough of the surrounding room.
+export const CAMERA_ZOOM = 1.45;
 
 // Kill / interact detection radius
 export const KILL_RADIUS = 80;
