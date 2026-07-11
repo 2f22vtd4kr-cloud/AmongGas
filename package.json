@@ -1,0 +1,17 @@
+{
+  "name": "among-gas-web",
+  "version": "1.0.0",
+  "description": "Among Us clone ported to TypeScript + Phaser 3 (Telegram Mini App)",
+  "scripts": {
+    "dev": "vite --port 5000 --host 0.0.0.0",
+    "build": "tsc && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "phaser": "^3.90.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "vite": "^5.4.21"
+  }
+}

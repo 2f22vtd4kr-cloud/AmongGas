@@ -1,0 +1,24 @@
+You are an expert full-stack game developer specializing in porting Python Pygame games to modern web technologies for Telegram HTML5 Mini Apps.
+
+Project: Port the complete "AmongGas" Among Us clone (https://github.com/2f22vtd4kr-cloud/AmongGas) from Pygame/Python to TypeScript + HTML5 Canvas (or Phaser 3 if it fits better for performance and features). 
+
+**Strict requirements:**
+- Preserve **ALL original game logic, gameplay mechanics, physics, collision detection, task system, voting, impostor mechanics, bot AI, etc. exactly** — no simplifications or changes to balance/gameplay.
+- Preserve **ALL visuals exactly** (sprites, animations, tilemap, UI, colors, layouts). Use the exact same Assets folder structure and images/sounds.
+- Target: Telegram HTML5 Mini App (must work in Telegram WebView, support touch + keyboard input, proper scaling/resizing for mobile).
+- Use TypeScript for all code (strong typing where possible).
+- Single HTML file entry point + TS files (or proper module structure).
+- No backend changes initially — keep local/singleplayer "Freeplay" mode fully functional. Multiplayer (LAN sockets) can be adapted later to WebSockets if needed, but prioritize client-side game loop first.
+
+**Key Pygame → Web mappings:**
+- Game loop: requestAnimationFrame with delta time (dt).
+- Sprites / groups: Custom Sprite class or Phaser equivalents + arrays for layers (z-order important).
+- Input: Keyboard (WASD/arrows) + touch virtual joystick for mobile/Telegram.
+- Rendering: HTML5 Canvas 2D (or WebGL via Phaser). Handle camera/follow player.
+- Tilemap: Load the existing .tmx (pytmx) data — convert tilemap loading/parsing to JS/TS (use a simple JSON export or custom parser if needed).
+- Sounds: Howler.js or Web Audio API. Load all ambient/music/sfx from Assets.
+- Assets: Include the full /Assets folder (images, sounds, tilemaps). Serve them statically.
+- Physics/Collisions: Exact same AABB + vector math (reimplement Vector2 if needed).
+- State management: Menu → Game → Tasks → Emergency meetings, etc.
+
+**Project structure to create in Replit:**
