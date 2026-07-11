@@ -11,7 +11,11 @@ import { parseTmx } from '../utils/TmxParser';
 import { fitContain } from '../utils/imageFit';
 
 const BOT_NAMES = ['Alpha','Beta','Gamma','Delta','Epsilon','Zeta','Eta','Theta'];
-const BOT_COLOR_POOL = ['Black','Brown','Pink','Purple','White','Orange','Blue','Yellow'];
+// Prioritise colors that have full 18-frame walk animations (FULL_COLORS in
+// GamePreloadScene: red, blue, green, orange, yellow).  Red is reserved for
+// the player, so bots get Blue, Green, Orange, Yellow first — those four all
+// animate properly.  Black/Brown/Pink/Purple are fallbacks for extra bots.
+const BOT_COLOR_POOL = ['Blue','Green','Orange','Yellow','Black','Brown','Pink','Purple'];
 
 export class GameScene extends Phaser.Scene {
   // --- sprites ---

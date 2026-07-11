@@ -23,6 +23,9 @@ export class Bot extends Phaser.Physics.Arcade.Sprite {
   private changeInterval = 0;
   private nameLabel!: Phaser.GameObjects.Text;
   private lastStep = 0;
+  private bobTimer = 0;
+  // Random phase so bots don't all bob in sync
+  private bobPhase = Math.random() * Math.PI * 2;
 
   constructor(scene: Phaser.Scene, data: BotData) {
     const lc = data.color.toLowerCase();
@@ -84,7 +87,26 @@ export class Bot extends Phaser.Physics.Arcade.Sprite {
 
     const animKey = `${this.colorKey}_walk_${this.direction}`;
     if (this.anims.currentAnim?.key !== animKey) {
-      this.anims.play(animKey, true);
+      // Guard: only play if the animation was actually created (some color
+      // variants only have 1 sprite frame and silently fail otherwise).
+      if (this.scene.anims.exists(animKey)) {
+        this.anims.play(animKey, true);
+      }
+    }
+
+    // Y-scale bob — gives walking feedback for single-frame (BASIC_COLOR)
+    // bots that have no multi-frame walk sheet.  Ignored by bots whose full
+    // animation already conveys movement.
+    const anim = this.anims.currentAnim;
+    const isSingleFrame = !anim || anim.frames.length <= 1;
+    if (isSingleFrame && (vx !== 0 || vy !== 0)) {
+      this.bobTimer += dt;
+      // Gentle 5 % vertical squeeze at ~4 Hz — looks like a stride
+      const bob = Math.sin(this.bobTimer * 0.025 + this.bobPhase);
+      this.setScale(1, 1 + bob * 0.05);
+    } else {
+      // Reset scale when the full animation takes over or bot is still
+      this.setScale(1, 1);
     }
 
     // Footsteps

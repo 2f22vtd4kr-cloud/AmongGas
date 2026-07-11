@@ -271,7 +271,7 @@ export class GamePreloadScene extends Phaser.Scene {
         }
         if (frames.length === 0) continue;
         try {
-          this.anims.create({ key: `${lc}_walk_${dir}`, frames, frameRate: 12, repeat: -1 });
+          this.anims.create({ key: `${lc}_walk_${dir}`, frames, frameRate: 20, repeat: -1 });
           this.anims.create({ key: `${lc}_idle_${dir}`, frames: [frames[0]], frameRate: 1, repeat: 0 });
         } catch (_) {}
       }
