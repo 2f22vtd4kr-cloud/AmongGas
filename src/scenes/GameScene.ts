@@ -27,7 +27,12 @@ const EMERGENCY_BTN_H = 104;
 const TASK_SPRITE_VARIANTS: Record<string, { base: string; highlight?: string; connected?: string }> = {
   electricity_wires: { base: 'electricity_wires', highlight: 'electricity_wires_highlight', connected: 'electricity_wires_connected' },
   wifi:              { base: 'wifi',              highlight: 'wifi_highlight',              connected: 'wifi_connected' },
-  nav:               { base: 'nav',              highlight: 'navigation_highlight' },
+  nav:               { base: 'nav',               highlight: 'navigation_highlight' },
+  // Extra glow variants — art already existed in Assets/Images/Items/ and
+  // was preloaded, just not wired to a task object yet.
+  reactor_btn:       { base: 'reactor_btn',       highlight: 'reactor_btn_highlight' },
+  generator_circuit: { base: 'generator',         highlight: 'generator_highlight' },
+  garbage_liver:     { base: 'garbage_liver',     highlight: 'garbage_liver_highlight' },
 };
 
 /** Short display names for the task list panel. */
@@ -41,6 +46,33 @@ const SHORT_TASK_NAMES: Record<string, string> = {
   empty_garbage:   'Empty Garbage',
   clear_asteroids: 'Clear Asteroids',
 };
+
+/** Display-friendly room names for the AMBIENT_CENTRES keys, used to prefix task-list rows ("Room: Task"), matching the original game's list format. */
+const ROOM_DISPLAY_NAMES: Record<string, string> = {
+  cafeteria:       'Cafeteria',
+  medbay_room:     'Medbay',
+  security_room:   'Security',
+  reactor_room:    'Reactor',
+  u_engine_room:   'Upper Engine',
+  l_engine_room:   'Lower Engine',
+  electrical_room: 'Electrical',
+  storage_room:    'Storage',
+  admin_room:      'Admin',
+  comms3:          'Communications',
+  oxygen_room:     'Oxygen',
+  cockpit:         'Cockpit',
+  weapons:         'Weapons',
+};
+
+/** Finds the nearest known room to a world position, for task-list "Room: Task" labels. */
+function nearestRoomName(x: number, y: number): string | null {
+  let best: string | null = null, bestDist = Infinity;
+  for (const [key, c] of Object.entries(AMBIENT_CENTRES)) {
+    const d = Phaser.Math.Distance.Between(x, y, c.x, c.y);
+    if (d < bestDist) { bestDist = d; best = key; }
+  }
+  return best ? ROOM_DISPLAY_NAMES[best] ?? null : null;
+}
 
 export class GameScene extends Phaser.Scene {
   // --- sprites ---
@@ -72,11 +104,10 @@ export class GameScene extends Phaser.Scene {
   // --- task list HUD ---
   private taskListRows: Phaser.GameObjects.Text[] = [];
 
-  // --- task compass (directional arrow toward tracked task) ---
+  // --- task compass (edge-hugging directional arrow toward tracked task) ---
   private selectedTaskId: string | null = null;
   private taskArrow!: Phaser.GameObjects.Container;
   private taskArrowIcon!: Phaser.GameObjects.Triangle;
-  private taskArrowLabel!: Phaser.GameObjects.Text;
 
   // --- UI overlay ---
   // A second, unzoomed camera dedicated to HUD/UI. Camera zoom/rotation on
@@ -356,15 +387,27 @@ export class GameScene extends Phaser.Scene {
     const { width: W, height: H } = this.scale;
     this.hud = this.add.container(0, 0).setScrollFactor(0).setDepth(100);
 
-    // Task progress bar background — shifted down by safe-area top inset
-    const barY = 12 + this.safeTop;
-    const barBg = this.add.rectangle(W / 2, barY, 300, 18, 0x333333).setOrigin(0.5, 0);
-    const barBorder = this.add.rectangle(W / 2, barY, 302, 20, 0x888888).setOrigin(0.5, 0).setFillStyle(0x000000, 0).setStrokeStyle(1, 0xaaaaaa);
-    this.taskBarFill = this.add.rectangle(W / 2 - 150, barY, 0, 18, 0x00dd66).setOrigin(0, 0);
-    this.taskLabel = this.add.text(W / 2, barY + 23, `Tasks: 0 / ${NO_OF_MISSIONS}`, {
-      fontSize: '14px', color: '#fff', stroke: '#000', strokeThickness: 3, fontFamily: 'Arial',
+    // Task progress bar — enlarged and divided into NO_OF_MISSIONS tick
+    // segments, matching the original game's bold "TOTAL TASKS COMPLETED"
+    // bar instead of a thin plain fill strip.
+    const barY = 10 + this.safeTop;
+    const barW = 340, barH = 26;
+    const barX0 = W / 2 - barW / 2;
+    const barBg = this.add.rectangle(W / 2, barY, barW, barH, 0x1a1a1a, 0.85).setOrigin(0.5, 0);
+    const barBorder = this.add.rectangle(W / 2, barY, barW + 3, barH + 3, 0x000000, 0)
+      .setOrigin(0.5, 0).setStrokeStyle(2, 0xbbbbbb, 0.9);
+    this.taskBarFill = this.add.rectangle(barX0, barY + 1.5, 0, barH - 3, 0x2fd66a).setOrigin(0, 0);
+    // Tick-mark dividers, one per mission, so the bar reads as a segmented
+    // progress meter rather than a smooth gradient fill.
+    const ticks = this.add.graphics().lineStyle(1.5, 0x000000, 0.55);
+    for (let i = 1; i < NO_OF_MISSIONS; i++) {
+      const tx = barX0 + (barW / NO_OF_MISSIONS) * i;
+      ticks.lineBetween(tx, barY + 2, tx, barY + barH - 2);
+    }
+    this.taskLabel = this.add.text(W / 2, barY + barH + 4, `Tasks: 0 / ${NO_OF_MISSIONS}`, {
+      fontSize: '15px', color: '#fff', stroke: '#000', strokeThickness: 3, fontFamily: 'Arial', fontStyle: 'bold',
     }).setOrigin(0.5, 0);
-    this.hud.add([barBg, barBorder, this.taskBarFill, this.taskLabel]);
+    this.hud.add([barBg, this.taskBarFill, ticks, barBorder, this.taskLabel]);
 
     // Interact prompt — sits just above the action button stack so it never
     // overlaps a thumb resting on the buttons below it.
@@ -420,32 +463,18 @@ export class GameScene extends Phaser.Scene {
   }
 
   /**
-   * Builds a compass-style arrow HUD element that always points from the
-   * player toward their currently tracked task. Tapping a row in the task
+   * Builds an edge-hugging compass arrow: a bare yellow chevron (no ring,
+   * no label — matching the real game's look) that rides along the border
+   * of the screen and rotates every frame to always point from screen
+   * centre toward whichever task is tracked. Tapping a row in the task
    * list picks that task as the target; otherwise it defaults to the first
-   * incomplete task. Mirrors the original Among Us "arrow toward selected
-   * task" navigation aid, so players don't have to memorize task locations.
+   * incomplete task. Positioning math lives in updateTaskArrow().
    */
   private buildTaskCompass() {
-    const { width: W } = this.scale;
-    const barY = 12 + this.safeTop;
-    const cx = W / 2;
-    const cy = barY + 68;
-
-    this.taskArrow = this.add.container(cx, cy).setDepth(101);
-
-    // Sized up and thickened so the arrow reads clearly at a glance, like
-    // the bold directional chevron in the original game, instead of a small
-    // HUD glyph that gets lost against the map art.
-    const ring = this.add.circle(0, 0, 34, 0x000000, 0.5).setStrokeStyle(2, 0x99bbdd, 0.8);
-    this.taskArrowIcon = this.add.triangle(0, 0, 0, -22, 18, 17, -18, 17, 0xffee22)
-      .setStrokeStyle(2.5, 0x664400);
-    this.taskArrowLabel = this.add.text(0, 40, '', {
-      fontSize: '13px', color: '#ffee22', fontFamily: 'Arial', fontStyle: 'bold',
-      stroke: '#000', strokeThickness: 3,
-    }).setOrigin(0.5, 0);
-
-    this.taskArrow.add([ring, this.taskArrowIcon, this.taskArrowLabel]);
+    this.taskArrow = this.add.container(0, 0).setDepth(101);
+    this.taskArrowIcon = this.add.triangle(0, 0, 0, -20, 15, 14, -15, 14, 0xffe600)
+      .setStrokeStyle(2.5, 0x3a2c00, 1);
+    this.taskArrow.add(this.taskArrowIcon);
     this.hud.add(this.taskArrow);
   }
 
@@ -456,15 +485,34 @@ export class GameScene extends Phaser.Scene {
     return this.tasks.find(t => !t.completed) ?? null;
   }
 
-  /** Rotates the compass arrow to point from the player toward the tracked task each frame. */
+  /**
+   * Positions the compass arrow on the border of the screen and rotates it
+   * to point from screen centre toward the tracked task, every frame —
+   * a 360-degree edge radar, like the real game's task arrow. Once the
+   * player is close enough to actually interact with the task (tracked by
+   * detectNearby() via nearbyTask), the arrow disappears; the task object
+   * itself glows via its highlight texture instead (see updateTaskSprites).
+   */
   private updateTaskArrow() {
     const target = this.getTrackedTask();
-    if (!target) { this.taskArrow.setVisible(false); return; }
+    const atTarget = !!(target && this.nearbyTask && this.nearbyTask.id === target.id);
+    if (!target || atTarget) { this.taskArrow.setVisible(false); return; }
     this.taskArrow.setVisible(true);
+
     const angle = Phaser.Math.Angle.Between(this.player.x, this.player.y, target.x, target.y);
     this.taskArrowIcon.rotation = angle + Math.PI / 2;
-    const label = SHORT_TASK_NAMES[target.type] ?? target.title;
-    if (this.taskArrowLabel.text !== label) this.taskArrowLabel.setText(label);
+
+    // Edge point: cast a ray from screen centre in `angle` direction and
+    // clip it to a rectangle inset from the true screen border, so the
+    // arrow rides the border like a compass without ever clipping off it.
+    const { width: W, height: H } = this.scale;
+    const margin = 26;
+    const halfW = W / 2 - margin, halfH = H / 2 - margin;
+    const dx = Math.cos(angle), dy = Math.sin(angle);
+    const tx = dx !== 0 ? halfW / Math.abs(dx) : Infinity;
+    const ty = dy !== 0 ? halfH / Math.abs(dy) : Infinity;
+    const t = Math.min(tx, ty);
+    this.taskArrow.setPosition(W / 2 + dx * t, H / 2 + dy * t);
   }
 
   /**
@@ -477,15 +525,15 @@ export class GameScene extends Phaser.Scene {
     // Below the EMERGENCY button, which now uses full-size button art
     // (EMERGENCY_BTN_H tall) instead of a slim text label.
     const listY  = EMERGENCY_BTN_H + 66 + this.safeTop;
-    const listW  = 190;
-    const rowH   = 24;
+    const listW  = 250;
+    const rowH   = 26;
     const numRows = this.tasks.length;
-    const totalH  = 24 + numRows * rowH + 6;
+    const totalH  = 26 + numRows * rowH + 6;
 
-    const bg = this.add.rectangle(listX + listW / 2, listY + totalH / 2, listW, totalH, 0x000000, 0.60)
+    const bg = this.add.rectangle(listX + listW / 2, listY + totalH / 2, listW, totalH, 0x000000, 0.62)
       .setStrokeStyle(1, 0x334466);
     const hdr = this.add.text(listX + 8, listY + 5, 'TASKS', {
-      fontSize: '14px', color: '#99bbdd', fontStyle: 'bold', fontFamily: 'Arial',
+      fontSize: '15px', color: '#99bbdd', fontStyle: 'bold', fontFamily: 'Arial',
       stroke: '#000', strokeThickness: 2,
     });
     this.hud.add([bg, hdr]);
@@ -493,10 +541,9 @@ export class GameScene extends Phaser.Scene {
     this.taskListRows = [];
     for (let i = 0; i < this.tasks.length; i++) {
       const task = this.tasks[i];
-      const label = SHORT_TASK_NAMES[task.type] ?? task.title.slice(0, 14);
-      const rowY = listY + 24 + i * rowH;
-      const t = this.add.text(listX + 8, rowY, `\u25a1 ${label}`, {
-        fontSize: '14px', color: '#aaaaaa', fontFamily: 'Arial',
+      const rowY = listY + 26 + i * rowH;
+      const t = this.add.text(listX + 8, rowY, this.taskRowLabel(task), {
+        fontSize: '13px', color: '#aaaaaa', fontFamily: 'Arial',
         stroke: '#000', strokeThickness: 2,
       });
       this.taskListRows.push(t);
@@ -835,13 +882,24 @@ export class GameScene extends Phaser.Scene {
     this.scene.resume('GameScene');
   }
 
+  /**
+   * Formats a task-list row as "Room: Task Name", matching the original
+   * game's list format (room derived from the task's world position via
+   * the nearest AMBIENT_CENTRES entry — no new data invented).
+   */
+  private taskRowLabel(task: TaskDef): string {
+    const room = nearestRoomName(task.x, task.y);
+    const name = SHORT_TASK_NAMES[task.type] ?? task.title.slice(0, 18);
+    return room ? `${room}: ${name}` : name;
+  }
+
   /** Refresh the task-list rows to reflect current completion state. */
   private updateTaskList() {
     const tracked = this.getTrackedTask();
     for (let i = 0; i < this.taskListRows.length; i++) {
       const task = this.tasks[i];
       if (!task) continue;
-      const label = SHORT_TASK_NAMES[task.type] ?? task.title.slice(0, 14);
+      const label = this.taskRowLabel(task);
       if (task.completed) {
         this.taskListRows[i].setText(`\u2713 ${label}`).setColor('#44dd77');
       } else if (tracked && task.id === tracked.id) {
@@ -853,9 +911,8 @@ export class GameScene extends Phaser.Scene {
   }
 
   private updateTaskBar() {
-    const { width: W } = this.scale;
     const pct = NO_OF_MISSIONS > 0 ? this.tasksDone / NO_OF_MISSIONS : 0;
-    this.taskBarFill.setSize(300 * pct, 18);
+    this.taskBarFill.setSize(340 * pct, 23);
     this.taskLabel.setText(`Tasks: ${this.tasksDone} / ${NO_OF_MISSIONS}`);
   }
 

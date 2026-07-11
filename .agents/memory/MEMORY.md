@@ -3,3 +3,4 @@
 - [Among Us walk-frame counts](among-us-walk-frame-counts.md) — down has 18 walk frames, up/left/right only 17, for every color; loop bounds must be per-direction.
 - [Among Us known pre-existing bugs](among-us-known-bugs.md) — red visor green, anims.stop() required before setTexture in die().
 - [Among Us UI asset inventory](among-us-ui-asset-inventory.md) — which HUD icons exist as real art in Assets/ vs which (USE/REPORT/settings/chat) have none; never fabricate the missing ones.
+- [Screen-edge compass arrow](phaser-edge-hugging-compass.md) — ray-cast from screen centre toward target, clip to an inset rect, for a 360° HUD direction indicator (Among Us task arrow).

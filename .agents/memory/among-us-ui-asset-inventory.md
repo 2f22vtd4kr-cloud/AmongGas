@@ -1,11 +1,19 @@
 ---
-name: Among Us clone — UI icon asset inventory
-description: Which HUD button icons exist as real art in Assets/ vs which are missing, for matching the mobile-reference Among Us UI.
+name: Among Us UI asset inventory
+description: Which HUD icon assets exist as real art under Assets/ vs which are missing; never fabricate the missing ones without asking.
 ---
 
-Checked when comparing the game's HUD against a real Among Us mobile-gameplay reference screenshot.
+## Exists as real art (safe to wire into code)
+- `Assets/Images/UI/`: kill_icon(+_dim), emergency_icon(+_dim), sabotage_icon(+_dim), light_bulb_icon(+_dim), map_button, close.
+- `Assets/Images/Items/`: highlight ("glow when nearby") variants exist for far more task objects than were originally wired into `TASK_SPRITE_VARIANTS` in GameScene.ts — e.g. reactor_btn_highlight, generator_highlight, garbage_liver_highlight, upper_engine_highlight, lower_engine_highlight, fuel_engine_highlighted, security_monitor_highlight, admin_control1/2_highlight. Check this map before assuming a glow effect needs new art — it usually already exists, just unused.
+- `Assets/Images/Meeting/`: chat.png / chat_dead.png — exists, but is meeting-scene chat UI art, not a top-right HUD chat-bubble icon equivalent to real Among Us's persistent HUD chat button.
 
-- Real icon art that exists and should be used instead of emoji/drawn shapes: `Assets/Images/UI/kill_icon(.png/_dim.png)`, `emergency_icon(.png/_dim.png)`, `sabotage_icon`, `light_bulb_icon`, `map_button.png`. All were loaded in `GamePreloadScene` but several sat unused in favor of emoji text — worth checking for this pattern again if more HUD buttons get revisited.
-- No dedicated small icon graphic exists anywhere in `Assets/` for "USE" or "REPORT" buttons, nor for settings-gear/chat-bubble/ping HUD elements seen in real mobile Among Us. The large `Assets/Images/Alerts/report_dead_body_*` files are full-screen banners, not button icons — don't mistake them for one.
-- **Why:** the project's explicit rule is to never vector-draw or generate new game assets — only use what's already in `Assets/`. Confirmed via full `find`/`ls` of `Assets/Images/{UI,Items,Alerts}` that no hand/report/use/settings/chat icon exists under any filename.
-- **How to apply:** when asked to visually match reference Among Us UI again, swap in real assets where they exist (grep `GamePreloadScene` load list first — it often loads more than what's wired up), and explicitly tell the user which reference elements have no asset instead of inventing one.
+## Missing entirely (must report as a gap, never draw a replacement)
+- No settings/gear/cog icon anywhere under Assets/.
+- No dedicated USE / REPORT button icon art (large translucent circular icon+caption buttons in the reference are recreated with Phaser-drawn circles + emoji glyph + caption text, not image assets — this is UI chrome drawn with primitives, which is fine; it is not "fabricating an asset" the same way generating a new PNG would be).
+- No ping-display, chat-bubble-for-HUD, or arrow/compass image asset — the task-direction compass is a small triangle drawn with Phaser graphics primitives (`Triangle` game object), not an image, for the same reason.
+
+## Known data gaps for further "Room: Task" list work
+- Task world objects: `electricity_wires`, `nav`, `wifi`, `engines`, `reactor_btn`, `generator_circuit`, `garbage_liver`, `laptop` (TMX object names in `buildTasks()`/GameScene.ts).
+- Room name for a task list row can be derived without inventing data: find the nearest entry in `AMBIENT_CENTRES` (settings.ts) to the task's world x/y and use that room's display name. No per-task room field exists in the data model — compute it, don't add a new field.
+- Two task types have no glow-on-approach because their world sprite isn't tracked in `taskSprites` at all: `engines` (fuel_engine task — `placeItemSprites`'s imgMap has no `engines` key, only an unrelated `fuel_engine_item` key) and `laptop` (clear_asteroids — maps to `cafeteria_comp` texture, no highlight variant exists for it). Fixing requires deeper TMX/sprite-placement changes, not just a variants-map edit.
