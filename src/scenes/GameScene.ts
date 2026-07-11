@@ -17,6 +17,25 @@ const BOT_NAMES = ['Alpha','Beta','Gamma','Delta','Epsilon','Zeta','Eta','Theta'
 // animate properly.  Black/Brown/Pink/Purple are fallbacks for extra bots.
 const BOT_COLOR_POOL = ['Blue','Green','Orange','Yellow','Black','Brown','Pink','Purple'];
 
+/** Texture key variants per world-object name: base / highlight (near) / connected (done). */
+const TASK_SPRITE_VARIANTS: Record<string, { base: string; highlight?: string; connected?: string }> = {
+  electricity_wires: { base: 'electricity_wires', highlight: 'electricity_wires_highlight', connected: 'electricity_wires_connected' },
+  wifi:              { base: 'wifi',              highlight: 'wifi_highlight',              connected: 'wifi_connected' },
+  nav:               { base: 'nav',              highlight: 'navigation_highlight' },
+};
+
+/** Short display names for the task list panel. */
+const SHORT_TASK_NAMES: Record<string, string> = {
+  fix_wiring:      'Fix Wiring',
+  stabilize_nav:   'Stabilize Nav',
+  reboot_wifi:     'Reboot WiFi',
+  fuel_engine:     'Fuel Engine',
+  start_reactor:   'Divert Power',
+  align_engine:    'Align Engine',
+  empty_garbage:   'Empty Garbage',
+  clear_asteroids: 'Clear Asteroids',
+};
+
 export class GameScene extends Phaser.Scene {
   // --- sprites ---
   public player!: Player;
@@ -40,6 +59,12 @@ export class GameScene extends Phaser.Scene {
   // --- interaction markers ---
   private interactZones: { obj: TaskDef | null; name: string; x: number; y: number; sprite?: Phaser.GameObjects.Sprite }[] = [];
   private emergencyPos = { x: 3257, y: 655 };
+  // Sprites placed in the world for task interactables, keyed by objectName.
+  // Used to swap textures: base / highlight (player nearby) / connected (done).
+  private taskSprites = new Map<string, Phaser.GameObjects.Image>();
+
+  // --- task list HUD ---
+  private taskListRows: Phaser.GameObjects.Text[] = [];
 
   // --- UI overlay ---
   // A second, unzoomed camera dedicated to HUD/UI. Camera zoom/rotation on
@@ -286,6 +311,29 @@ export class GameScene extends Phaser.Scene {
         // squishing it to match the TMX bounding box (which caused laptop art
         // to appear stretched when width/height proportions differed).
         fitContain(sp, obj.width || 64, obj.height || 48);
+
+        // Track world sprites for task interactables so we can swap to
+        // highlight (nearby) / connected (completed) variants later.
+        if (this.tasks.some(t => t.objectName === obj.name) && !this.taskSprites.has(obj.name)) {
+          this.taskSprites.set(obj.name, sp);
+        }
+      }
+    }
+  }
+
+  /** Swap each task's world sprite to its highlight / connected / base variant. */
+  private updateTaskSprites() {
+    for (const [objName, sprite] of this.taskSprites) {
+      const variants = TASK_SPRITE_VARIANTS[objName];
+      if (!variants) continue;
+      const tasksForObj = this.tasks.filter(t => t.objectName === objName);
+      const allDone   = tasksForObj.length > 0 && tasksForObj.every(t => t.completed);
+      const isNearby  = this.nearbyTask?.objectName === objName;
+      const nextKey   = allDone && variants.connected  ? variants.connected
+                      : isNearby && variants.highlight ? variants.highlight
+                      : variants.base;
+      if (sprite.texture.key !== nextKey && this.textures.exists(nextKey)) {
+        sprite.setTexture(nextKey);
       }
     }
   }
@@ -341,6 +389,43 @@ export class GameScene extends Phaser.Scene {
 
     this.useBtn = this.buildActionButton(actionX, H - 60 - sb, 52, 0x88ff88, '✋', () => this.tryInteract());
     this.useBtn.setVisible(false);
+
+    // Task list panel — left side, below emergency button
+    this.buildTaskListInHud();
+  }
+
+  /**
+   * Builds the persistent task-list panel on the left side of the HUD.
+   * Shows each task with a ☐ / ✅ indicator, updated by updateTaskList().
+   * Items are added to this.hud so the UI camera picks them up automatically.
+   */
+  private buildTaskListInHud() {
+    const listX  = 10;
+    const listY  = 108 + this.safeTop;   // below the 🚨 MEETING button
+    const listW  = 160;
+    const rowH   = 19;
+    const numRows = this.tasks.length;
+    const totalH  = 18 + numRows * rowH + 4;
+
+    const bg = this.add.rectangle(listX + listW / 2, listY + totalH / 2, listW, totalH, 0x000000, 0.60)
+      .setStrokeStyle(1, 0x334466);
+    const hdr = this.add.text(listX + 6, listY + 3, 'TASKS', {
+      fontSize: '11px', color: '#99bbdd', fontStyle: 'bold', fontFamily: 'Arial',
+      stroke: '#000', strokeThickness: 2,
+    });
+    this.hud.add([bg, hdr]);
+
+    this.taskListRows = [];
+    for (let i = 0; i < this.tasks.length; i++) {
+      const task = this.tasks[i];
+      const label = SHORT_TASK_NAMES[task.type] ?? task.title.slice(0, 14);
+      const t = this.add.text(listX + 6, listY + 18 + i * rowH, `\u25a1 ${label}`, {
+        fontSize: '11px', color: '#aaaaaa', fontFamily: 'Arial',
+        stroke: '#000', strokeThickness: 2,
+      });
+      this.taskListRows.push(t);
+      this.hud.add(t);
+    }
   }
 
   /**
@@ -550,6 +635,9 @@ export class GameScene extends Phaser.Scene {
     this.nearbyTask = closest.task;
     this.nearbyCorpse = closest.corpse;
 
+    // Update world-sprite textures for task interactables
+    this.updateTaskSprites();
+
     // Prompt
     const nearEmergency = eDist < INTERACT_RADIUS * 1.5 && this.player.isAlive;
     if (this.nearbyTask) {
@@ -617,8 +705,29 @@ export class GameScene extends Phaser.Scene {
       this.tasksDone++;
       this.sound.play('sfx_task_done', { volume: 0.8 });
       this.updateTaskBar();
+      this.updateTaskList();
+      // Immediately flip the world sprite to its "connected" state
+      const sprite = this.taskSprites.get(t.objectName);
+      const variants = TASK_SPRITE_VARIANTS[t.objectName];
+      if (sprite && variants?.connected && this.textures.exists(variants.connected)) {
+        sprite.setTexture(variants.connected);
+      }
     }
     this.scene.resume('GameScene');
+  }
+
+  /** Refresh the task-list rows to reflect current completion state. */
+  private updateTaskList() {
+    for (let i = 0; i < this.taskListRows.length; i++) {
+      const task = this.tasks[i];
+      if (!task) continue;
+      const label = SHORT_TASK_NAMES[task.type] ?? task.title.slice(0, 14);
+      if (task.completed) {
+        this.taskListRows[i].setText(`\u2713 ${label}`).setColor('#44dd77');
+      } else {
+        this.taskListRows[i].setText(`\u25a1 ${label}`).setColor('#aaaaaa');
+      }
+    }
   }
 
   private updateTaskBar() {

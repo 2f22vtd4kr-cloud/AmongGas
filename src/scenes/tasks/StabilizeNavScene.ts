@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import type { GameScene } from '../GameScene';
+import { fitContain } from '../../utils/imageFit';
 
 interface TaskData { taskId: string; gameScene: GameScene; }
 
@@ -29,7 +30,7 @@ export class StabilizeNavScene extends Phaser.Scene {
     this.panelBounds = { px, py, pw, ph };
 
     if (this.textures.exists('task_nav_base')) {
-      this.add.image(W/2, H/2, 'task_nav_base').setDisplaySize(pw, ph);
+      fitContain(this.add.image(W/2, H/2, 'task_nav_base'), pw, ph);
     } else {
       this.add.rectangle(W/2, H/2, pw, ph, 0x0a1628).setStrokeStyle(2, 0x0044ff);
     }

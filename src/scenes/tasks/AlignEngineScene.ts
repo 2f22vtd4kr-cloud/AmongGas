@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import type { GameScene } from '../GameScene';
+import { fitContain } from '../../utils/imageFit';
 
 interface TaskData { taskId: string; gameScene: GameScene; }
 
@@ -30,7 +31,7 @@ export class AlignEngineScene extends Phaser.Scene {
     const px = (W - pw) / 2, py = (H - ph) / 2;
 
     if (this.textures.exists('task_align_base')) {
-      this.add.image(W / 2, H / 2, 'task_align_base').setDisplaySize(pw, ph);
+      fitContain(this.add.image(W / 2, H / 2, 'task_align_base'), pw, ph);
     } else {
       this.add.rectangle(W / 2, H / 2, pw, ph, 0x0d1a0d).setStrokeStyle(2, 0x00ff44);
     }

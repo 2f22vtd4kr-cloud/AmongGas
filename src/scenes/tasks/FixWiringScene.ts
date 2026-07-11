@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import type { GameScene } from '../GameScene';
+import { fitContain } from '../../utils/imageFit';
 
 interface TaskData { taskId: string; gameScene: GameScene; }
 
@@ -33,7 +34,7 @@ export class FixWiringScene extends Phaser.Scene {
     this.add.rectangle(W/2, H/2, pw, ph, 0x1a1a2e).setStrokeStyle(2, 0x4444ff);
 
     if (this.textures.exists('task_wiring_base')) {
-      this.add.image(W/2, H/2, 'task_wiring_base').setDisplaySize(pw - 40, ph - 80);
+      fitContain(this.add.image(W/2, H/2, 'task_wiring_base'), pw - 40, ph - 80);
     }
 
     this.add.text(W/2, py + 18, 'Fix The Electricity Wires', {

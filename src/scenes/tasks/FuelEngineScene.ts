@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import type { GameScene } from '../GameScene';
+import { fitContain } from '../../utils/imageFit';
 
 interface TaskData { taskId: string; gameScene: GameScene; }
 
@@ -37,7 +38,7 @@ export class FuelEngineScene extends Phaser.Scene {
     closeBtn.on('pointerdown', () => this.closeTask());
 
     if (this.textures.exists('task_fuel_base')) {
-      this.add.image(W/2, H/2, 'task_fuel_base').setDisplaySize(pw-20, ph-20).setDepth(-1);
+      fitContain(this.add.image(W/2, H/2, 'task_fuel_base'), pw - 20, ph - 20).setDepth(-1);
     }
 
     // Tank

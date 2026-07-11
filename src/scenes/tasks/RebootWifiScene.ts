@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import type { GameScene } from '../GameScene';
+import { fitContain } from '../../utils/imageFit';
 
 interface TaskData { taskId: string; gameScene: GameScene; }
 
@@ -18,7 +19,9 @@ export class RebootWifiScene extends Phaser.Scene {
     this.add.rectangle(W/2, H/2, W, H, 0x000000, 0.85);
 
     const pw = Math.min(W - 60, 480);
-    const ph = Math.min(Math.round(H * 0.52), 520);
+    // WiFi bg art is 366×716 (portrait) — give the panel enough height to
+    // show it without squishing; cap at screen height minus safe margins.
+    const ph = Math.min(H - 100, 720);
     const px = (W-pw)/2, py = (H-ph)/2;
     this.add.rectangle(W/2, H/2, pw, ph, 0x0d1117).setStrokeStyle(2, 0x00aaff);
     this.add.text(W/2, py+18, 'Reboot The Wifi', {
@@ -31,7 +34,7 @@ export class RebootWifiScene extends Phaser.Scene {
     closeBtn.on('pointerdown', () => this.closeTask());
 
     if (this.textures.exists('task_wifi_bg')) {
-      this.add.image(W/2, H/2+10, 'task_wifi_bg').setDisplaySize(pw-40, ph-60);
+      fitContain(this.add.image(W/2, H/2 + 10, 'task_wifi_bg'), pw - 30, ph - 80);
     }
 
     // Track

@@ -113,6 +113,7 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
 
   die() {
     this.isAlive = false;
+    this.anims.stop(); // stop walk animation so it doesn't keep overriding the dead texture
     const lc = this.colorKey;
     this.setTexture(`dead_${lc}`);
     this.setDepth(3);

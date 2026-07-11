@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import type { GameScene } from '../GameScene';
+import { fitContain } from '../../utils/imageFit';
 
 interface TaskData { taskId: string; gameScene: GameScene; }
 
@@ -29,7 +30,7 @@ export class EmptyGarbageScene extends Phaser.Scene {
     const px = (W - pw) / 2, py = (H - ph) / 2;
 
     if (this.textures.exists('task_garbage_full')) {
-      this.bgImg = this.add.image(W / 2, H / 2, 'task_garbage_full').setDisplaySize(pw, ph);
+      this.bgImg = fitContain(this.add.image(W / 2, H / 2, 'task_garbage_full'), pw, ph);
     } else {
       this.add.rectangle(W / 2, H / 2, pw, ph, 0x1a1108).setStrokeStyle(2, 0x886600);
     }

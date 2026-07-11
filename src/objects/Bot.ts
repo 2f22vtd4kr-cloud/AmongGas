@@ -118,6 +118,7 @@ export class Bot extends Phaser.Physics.Arcade.Sprite {
 
   die() {
     this.isAlive = false;
+    this.anims.stop(); // stop walk animation so it doesn't keep overriding the dead texture
     this.setTexture(`dead_${this.colorKey}`);
     this.setDepth(3);
     this.nameLabel.setVisible(false);
