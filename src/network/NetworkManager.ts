@@ -55,4 +55,9 @@ export class NetworkManager {
     this.room?.leave();
     this.room = null;
   }
+
+  /** The local client's own session id within the current room, if connected. */
+  static get sessionId(): string | null {
+    return this.room?.sessionId ?? null;
+  }
 }

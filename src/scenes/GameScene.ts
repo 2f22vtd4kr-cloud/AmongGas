@@ -1,6 +1,9 @@
 import Phaser from 'phaser';
+import { getStateCallbacks } from '@colyseus/sdk';
 import { Player } from '../objects/Player';
 import { Bot } from '../objects/Bot';
+import { RemotePlayer } from '../objects/RemotePlayer';
+import { NetworkManager } from '../network/NetworkManager';
 import {
   BOT_POS, ALL_COLORS, PLAYER_SPAWN, WORLD_WIDTH, WORLD_HEIGHT,
   INTERACT_RADIUS, KILL_RADIUS, REPORT_RADIUS, NO_OF_MISSIONS,
@@ -9,6 +12,9 @@ import {
 import type { TaskDef, BotData } from '../types';
 import { parseTmx } from '../utils/TmxParser';
 import { fitContain } from '../utils/imageFit';
+
+/** How often (ms) the local player's position is sent to the server — 10 Hz, matching the server's TICK_MS. */
+const MOVE_SEND_INTERVAL_MS = 100;
 
 const BOT_NAMES = ['Alpha','Beta','Gamma','Delta','Epsilon','Zeta','Eta','Theta'];
 // Prioritise colors that have full 18-frame walk animations (FULL_COLORS in
@@ -170,6 +176,17 @@ export class GameScene extends Phaser.Scene {
   private nearbyTask: TaskDef | null = null;
   private nearbyCorpse: Bot | null = null;
 
+  // --- multiplayer (Phase 2: Position Sync) ---
+  // True when this GameScene was launched from LobbyScene (registry
+  // gameMode === 'online'). Bots/local win-checking are skipped in this
+  // mode — remote players are rendered from server state instead.
+  private isMultiplayer = false;
+  private remotePlayers = new Map<string, RemotePlayer>();
+  private moveSendAccum = 0;
+  private lastSentX = -1;
+  private lastSentY = -1;
+  private lastSentAnim = '';
+
   constructor() {
     super({ key: 'GameScene' });
   }
@@ -177,6 +194,7 @@ export class GameScene extends Phaser.Scene {
   create() {
     const playerName  = this.registry.get('playerName')  as string ?? 'Crewmate';
     const playerColor = this.registry.get('playerColor') as string ?? 'Red';
+    this.isMultiplayer = this.registry.get('gameMode') === 'online';
 
     // ── Background world image ──
     const bg = this.add.image(WORLD_WIDTH / 2, WORLD_HEIGHT / 2, 'map_bg');
@@ -204,23 +222,25 @@ export class GameScene extends Phaser.Scene {
     // ── Item sprites ──
     this.placeItemSprites(mapObjs);
 
-    // ── Bots ──
-    const impostor = Phaser.Math.Between(0, BOT_POS.length - 1);
-    this.impostorId = impostor;
-    const usedColors = new Set<string>([playerColor]);
-    for (let i = 0; i < BOT_POS.length; i++) {
-      let col = BOT_COLOR_POOL[i % BOT_COLOR_POOL.length];
-      if (usedColors.has(col)) col = ALL_COLORS.find(c => !usedColors.has(c)) ?? col;
-      usedColors.add(col);
-      const data: BotData = {
-        id: i, color: col,
-        x: BOT_POS[i].x, y: BOT_POS[i].y,
-        isImpostor: i === impostor,
-        alive: true, name: BOT_NAMES[i] ?? `Bot${i}`,
-      };
-      const bot = new Bot(this, data);
-      this.bots.push(bot);
-      this.physics.add.collider(bot, this.walls);
+    // ── Bots ── (Freeplay only — multiplayer uses real remote players instead)
+    if (!this.isMultiplayer) {
+      const impostor = Phaser.Math.Between(0, BOT_POS.length - 1);
+      this.impostorId = impostor;
+      const usedColors = new Set<string>([playerColor]);
+      for (let i = 0; i < BOT_POS.length; i++) {
+        let col = BOT_COLOR_POOL[i % BOT_COLOR_POOL.length];
+        if (usedColors.has(col)) col = ALL_COLORS.find(c => !usedColors.has(c)) ?? col;
+        usedColors.add(col);
+        const data: BotData = {
+          id: i, color: col,
+          x: BOT_POS[i].x, y: BOT_POS[i].y,
+          isImpostor: i === impostor,
+          alive: true, name: BOT_NAMES[i] ?? `Bot${i}`,
+        };
+        const bot = new Bot(this, data);
+        this.bots.push(bot);
+        this.physics.add.collider(bot, this.walls);
+      }
     }
 
     // ── Player ──
@@ -231,6 +251,9 @@ export class GameScene extends Phaser.Scene {
     for (const bot of this.bots) {
       this.physics.add.collider(this.player, bot);
     }
+
+    // ── Multiplayer: render other connected players from server state ──
+    if (this.isMultiplayer) this.initMultiplayer();
 
     // ── World bounds ──
     this.physics.world.setBounds(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
@@ -273,13 +296,15 @@ export class GameScene extends Phaser.Scene {
       this.sound.play('sfx_roundstart', { volume: 0.8 });
     });
 
-    // ── Impostor kill AI timer ──
-    this.time.addEvent({
-      delay: 8000,
-      callback: this.impostorAct,
-      callbackScope: this,
-      loop: true,
-    });
+    // ── Impostor kill AI timer (Freeplay only — multiplayer kills are server-driven, Phase 3) ──
+    if (!this.isMultiplayer) {
+      this.time.addEvent({
+        delay: 8000,
+        callback: this.impostorAct,
+        callbackScope: this,
+        loop: true,
+      });
+    }
 
     // ── Emergency cooldown ──
     this.emergencyCooldown = 30000;
@@ -792,13 +817,20 @@ export class GameScene extends Phaser.Scene {
     // Player
     this.player.update(this.cursors, this.wasd, delta, this.joystickForce);
 
-    // Bots
-    for (const bot of this.bots) bot.update(delta);
+    if (this.isMultiplayer) {
+      // Multiplayer (Phase 2: Position Sync) — no local bots or win-checking;
+      // remote players are rendered from server state instead.
+      this.updateRemotePlayers(delta);
+      this.sendPositionUpdate(delta);
+    } else {
+      // Bots
+      for (const bot of this.bots) bot.update(delta);
 
-    // Bot task completion — crew bots complete tasks they walk over, just like the player.
-    // Without this, any game where the player dies before finishing all tasks is a deadlock:
-    // tasks never complete, impostor can't achieve majority, game never ends.
-    this.botCheckTasks();
+      // Bot task completion — crew bots complete tasks they walk over, just like the player.
+      // Without this, any game where the player dies before finishing all tasks is a deadlock:
+      // tasks never complete, impostor can't achieve majority, game never ends.
+      this.botCheckTasks();
+    }
 
     // Keyboard interactions
     if (Phaser.Input.Keyboard.JustDown(this.eKey)) this.tryInteract();
@@ -817,8 +849,85 @@ export class GameScene extends Phaser.Scene {
     // Update per-task directional compass arrows
     this.updateTaskArrows();
 
-    // Win check
-    this.checkWinConditions();
+    // Win check (Freeplay only — multiplayer win conditions are decided by the server, Phase 3)
+    if (!this.isMultiplayer) this.checkWinConditions();
+  }
+
+  // ────────────────── Multiplayer (Phase 2: Position Sync) ──────────────────
+
+  /**
+   * Subscribes to the Colyseus room's `players` map: creates a RemotePlayer
+   * for every other connected client, keeps it in sync as their state
+   * changes, and removes it when they leave. The local player is excluded
+   * (it's already rendered by `this.player`).
+   */
+  private initMultiplayer() {
+    const room = NetworkManager.room;
+    if (!room) {
+      console.warn('[GameScene] initMultiplayer called with no active room — skipping.');
+      return;
+    }
+
+    // The server schema (server/schema/GameState.ts) isn't shared with the
+    // client build, so the decoded state is untyped at compile time here —
+    // cast to the shape we know PlayerState has.
+    type RemotePlayerState = { x: number; y: number; color: string; name: string; anim: string; isAlive: boolean };
+    const $ = getStateCallbacks(room) as unknown as (instance: unknown) => {
+      players: {
+        onAdd(cb: (player: RemotePlayerState, sessionId: string) => void, immediate?: boolean): void;
+        onRemove(cb: (player: RemotePlayerState, sessionId: string) => void): void;
+      };
+      onChange(cb: () => void): () => void;
+    };
+
+    $(room.state).players.onAdd((player, sessionId) => {
+      if (sessionId === room.sessionId) return; // local player already rendered as this.player
+
+      const rp = new RemotePlayer(this, player.x, player.y, player.color, player.name);
+      rp.setFrameKey(player.anim);
+      rp.setAlive(player.isAlive);
+      this.remotePlayers.set(sessionId, rp);
+
+      // Fires whenever any field on this player's schema instance changes —
+      // re-read the live values (the reference stays valid for the player's
+      // whole time in the room) rather than trusting the callback args.
+      $(player).onChange(() => {
+        rp.setTarget(player.x, player.y);
+        rp.setFrameKey(player.anim);
+        rp.setAlive(player.isAlive);
+      });
+    }, true);
+
+    $(room.state).players.onRemove((_player, sessionId) => {
+      this.remotePlayers.get(sessionId)?.destroy();
+      this.remotePlayers.delete(sessionId);
+    });
+  }
+
+  /** Dead-reckons every remote player toward its latest server position. */
+  private updateRemotePlayers(delta: number) {
+    for (const rp of this.remotePlayers.values()) rp.update(delta);
+  }
+
+  /**
+   * Sends the local player's position to the server at ~10 Hz (matching the
+   * server's TICK_MS), and only when it actually changed — avoids flooding
+   * the socket while idle. `anim` is the player's current texture-frame key
+   * (e.g. "red_down_3"), which the server relays verbatim to other clients.
+   */
+  private sendPositionUpdate(delta: number) {
+    this.moveSendAccum += delta;
+    if (this.moveSendAccum < MOVE_SEND_INTERVAL_MS) return;
+    this.moveSendAccum = 0;
+
+    const x = this.player.x, y = this.player.y;
+    const anim = this.player.texture.key;
+    if (x === this.lastSentX && y === this.lastSentY && anim === this.lastSentAnim) return;
+
+    this.lastSentX = x;
+    this.lastSentY = y;
+    this.lastSentAnim = anim;
+    NetworkManager.room?.send('MOVE', { x, y, anim });
   }
 
   private detectNearby() {
@@ -1363,5 +1472,10 @@ export class GameScene extends Phaser.Scene {
       this.sound.stopByKey(`amb_${key}`);
     }
     this.ambientPlaying.clear();
+
+    // Multiplayer: tear down remote player sprites (their schema listeners
+    // are torn down automatically by Colyseus when the room is left/disposed)
+    for (const rp of this.remotePlayers.values()) rp.destroy();
+    this.remotePlayers.clear();
   }
 }
