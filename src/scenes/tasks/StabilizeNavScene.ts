@@ -16,6 +16,7 @@ export class StabilizeNavScene extends Phaser.Scene {
   private indicator?: Phaser.GameObjects.Text;
   // panel bounds stored for clamping in update
   private panelBounds = { px: 0, py: 0, pw: 0, ph: 0 };
+  private done = false;
 
   constructor() { super({ key: 'StabilizeNavScene' }); }
   init(d: TaskData) { this.gameScene = d.gameScene; this.taskId = d.taskId; }
@@ -80,12 +81,13 @@ export class StabilizeNavScene extends Phaser.Scene {
   }
 
   update(_t: number, delta: number) {
+    if (this.done) return;
     this.renderScene();
     const dist = Phaser.Math.Distance.Between(this.joystickX, this.joystickY, this.targetX, this.targetY);
     if (dist < 25) {
       this.stableTime += delta / 1000;
       if (this.indicator) this.indicator.setText(`Hold… ${(this.STABLE_NEEDED - this.stableTime).toFixed(1)}s`);
-      if (this.stableTime >= this.STABLE_NEEDED) this.showSuccess();
+      if (this.stableTime >= this.STABLE_NEEDED) { this.done = true; this.showSuccess(); }
     } else {
       this.stableTime = 0;
       if (this.indicator) this.indicator.setText('Hold the marker on target!');

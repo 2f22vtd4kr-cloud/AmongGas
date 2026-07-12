@@ -909,6 +909,9 @@ export class GameScene extends Phaser.Scene {
       }
     }
     this.scene.resume('GameScene');
+    // Check win immediately — previously missing, so a crew task-completion
+    // win was never detected until the next kill or meeting fired.
+    this.checkWinConditions();
   }
 
   /**
@@ -992,11 +995,26 @@ export class GameScene extends Phaser.Scene {
     this.scene.resume('GameScene');
     if (ejectedId === null) return;
 
+    const { width: W, height: H } = this.scale;
+
+    // Player ejection — id -1 is used for the local player in MeetingScene
+    if (ejectedId === -1) {
+      this.player.die();
+      const name = this.registry.get('playerName') ?? 'You';
+      const t = this.add.text(W / 2, H / 2, `${name} was not the Impostor.`, {
+        fontSize: '32px', color: '#ffffff',
+        backgroundColor: '#00000099', padding: { x: 20, y: 12 }, fontFamily: 'Arial',
+      }).setOrigin(0.5).setScrollFactor(0).setDepth(200);
+      this.cameras.main.ignore(t);
+      this.time.delayedCall(3000, () => t.destroy());
+      this.checkWinConditions();
+      return;
+    }
+
     const bot = this.bots.find(b => b.botId === ejectedId);
     if (bot) {
       bot.die();
       const wasImp = bot.isImpostor;
-      const { width: W, height: H } = this.scale;
       const msg = wasImp
         ? `${bot.botName} was the Impostor!`
         : `${bot.botName} was not the Impostor.`;
@@ -1017,7 +1035,7 @@ export class GameScene extends Phaser.Scene {
     const imp = this.bots.find(b => b.isImpostor && b.isAlive);
     if (!imp) return;
 
-    // Target nearest alive victim
+    // Target nearest alive victim — bots AND the player
     let minDist = Infinity, target: Bot | null = null;
     for (const bot of this.bots) {
       if (!bot.isAlive || bot.isImpostor) continue;
@@ -1025,9 +1043,25 @@ export class GameScene extends Phaser.Scene {
       if (d < minDist) { minDist = d; target = bot; }
     }
 
+    // Check player too — previously omitted, making the player immortal in Freeplay
+    const playerDist = this.player.isAlive
+      ? Phaser.Math.Distance.Between(imp.x, imp.y, this.player.x, this.player.y)
+      : Infinity;
+
+    if (playerDist < minDist && playerDist < 300) {
+      // Player is the closest target
+      this.player.die();
+      this.sound.play('sfx_kill', { volume: 0.6 });
+      this.checkWinConditions();
+      return;
+    }
+
     if (target && minDist < 300) {
       target.die();
       this.sound.play('sfx_kill', { volume: 0.6 });
+      // Check win after bot kill — previously missing, so impostor wiping all
+      // crew bots wasn't detected until the player also died or a meeting fired.
+      this.checkWinConditions();
     }
   }
 

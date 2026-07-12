@@ -112,6 +112,7 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
   }
 
   die() {
+    if (!this.isAlive) return; // guard against double-die
     this.isAlive = false;
     this.anims.stop(); // stop walk animation so it doesn't keep overriding the dead texture
     const lc = this.colorKey;

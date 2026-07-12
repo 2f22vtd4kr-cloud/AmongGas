@@ -10,6 +10,7 @@ export class StartReactorScene extends Phaser.Scene {
   private playerInput: number[] = [];
   private buttons: Phaser.GameObjects.Rectangle[] = [];
   private showing = false;
+  private done = false;
   private SEQUENCE_LEN = 5;
 
   constructor() { super({ key: 'StartReactorScene' }); }
@@ -88,6 +89,7 @@ export class StartReactorScene extends Phaser.Scene {
   }
 
   private playerPress(idx: number) {
+    if (this.done) return;
     this.flashButton(idx);
     this.playerInput.push(idx);
     const pos = this.playerInput.length - 1;
@@ -96,7 +98,7 @@ export class StartReactorScene extends Phaser.Scene {
       this.time.delayedCall(600, () => this.playSequence());
       return;
     }
-    if (this.playerInput.length === this.sequence.length) this.showSuccess();
+    if (this.playerInput.length === this.sequence.length) { this.done = true; this.showSuccess(); }
   }
 
   private showSuccess() {

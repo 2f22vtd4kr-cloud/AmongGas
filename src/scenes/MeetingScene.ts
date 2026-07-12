@@ -20,6 +20,7 @@ export class MeetingScene extends Phaser.Scene {
   private timerText?: Phaser.GameObjects.Text;
   private elapsed = 0;
   private voteButtons: Phaser.GameObjects.Container[] = [];
+  private playerAlive = true;
 
   constructor() {
     super({ key: 'MeetingScene' });
@@ -199,9 +200,13 @@ export class MeetingScene extends Phaser.Scene {
 
     let maxVotes = 0;
     let ejected: number | 'skip' = 'skip';
+    let tied = false;
     for (const [k, cnt] of tally) {
-      if (cnt > maxVotes) { maxVotes = cnt; ejected = k; }
+      if (cnt > maxVotes) { maxVotes = cnt; ejected = k; tied = false; }
+      else if (cnt === maxVotes && k !== 'skip') { tied = true; }
     }
+    // Ties result in no ejection, matching the original Among Us behaviour
+    if (tied) ejected = 'skip';
 
     const { width: W, height: H } = this.scale;
     const ejectedVoter = ejected !== 'skip' ? this.voters.find(v => v.id === ejected) : null;
@@ -217,9 +222,10 @@ export class MeetingScene extends Phaser.Scene {
 
     this.time.delayedCall(3000, () => {
       const ejectedId = ejected === 'skip' ? null : ejected as number;
+      // resolveMeeting already calls scene.resume('GameScene') internally —
+      // the second resume here was redundant and is now removed.
       this.gameScene.resolveMeeting(ejectedId);
       this.scene.stop('MeetingScene');
-      this.scene.resume('GameScene');
     });
   }
 }

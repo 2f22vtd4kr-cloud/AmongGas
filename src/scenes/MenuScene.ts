@@ -165,6 +165,8 @@ export class MenuScene extends Phaser.Scene {
 
   private showNameInput() {
     const { width: W, height: H } = this.scale;
+    // Remove any leftover <input> from a previous call before creating a new one.
+    this.cleanupInput();
     this.clearScene();
 
     fitCover(this.add.image(W/2, H/2, 'menu_back2'), W, H);

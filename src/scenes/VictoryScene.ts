@@ -8,17 +8,20 @@ interface VictoryData {
 }
 
 export class VictoryScene extends Phaser.Scene {
+  private victoryData!: VictoryData;
+
   constructor() {
     super({ key: 'VictoryScene' });
   }
 
   init(data: VictoryData) {
-    // Store for create
-    this.registry.set('victoryData', data);
+    // Store in an instance variable so create() can read it without touching
+    // the shared registry — prevents stale data leaking into the next session.
+    this.victoryData = data;
   }
 
   create() {
-    const data = this.registry.get('victoryData') as VictoryData;
+    const data = this.victoryData;
     const { width: W, height: H } = this.scale;
 
     const isCrew = data.winner === 'crew';

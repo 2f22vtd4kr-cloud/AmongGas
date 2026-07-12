@@ -17,6 +17,7 @@ export class FixWiringScene extends Phaser.Scene {
   private rightPegs: { x: number; y: number; color: string }[] = [];
   private dragFrom: number | null = null;
   private connections: { from: number; to: number }[] = [];
+  private done = false;
 
   constructor() { super({ key: 'FixWiringScene' }); }
 
@@ -139,12 +140,12 @@ export class FixWiringScene extends Phaser.Scene {
   }
 
   private checkComplete() {
-    if (this.connections.length < WIRE_COLORS.length) return;
+    if (this.done || this.connections.length < WIRE_COLORS.length) return;
     let correct = 0;
     for (const conn of this.connections) {
       if (this.leftPegs[conn.from].color === this.rightPegs[conn.to].color) correct++;
     }
-    if (correct === WIRE_COLORS.length) this.showSuccess();
+    if (correct === WIRE_COLORS.length) { this.done = true; this.showSuccess(); }
   }
 
   private showSuccess() {
