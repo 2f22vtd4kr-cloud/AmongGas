@@ -10,3 +10,4 @@
 - [Colyseus Node.js SDK movement testing](colyseus-node-movement-testing.md) — single-hop MOVE with auto-calculated wait beats step-by-step walking; also covers a message-tracker queue-drain gotcha that silently corrupts assertions.
 - [Phaser scene + Colyseus listener cleanup](phaser-colyseus-listener-cleanup.md) — `scene.launch/stop` re-runs `create()` each time but never detaches `room.onMessage` handlers; must unsubscribe in `shutdown()` or listeners stack across repeated launches (e.g. one game with several meetings).
 - [Fog of war implementation](fog-of-war.md) — two-layer GeometryMask invertAlpha=true approach; Canvas-compatible; `{ add: false }` removed from Phaser 3.90 typings — use `add.graphics().setVisible(false)` instead.
+- [Freeplay vs multiplayer dual-mode systems](among-us-freeplay-vs-multiplayer-systems.md) — new impostor abilities need a local-AI mirror of the server handler for Freeplay; also covers a Phaser scene-instance-reuse reset gotcha.

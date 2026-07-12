@@ -336,11 +336,14 @@ See §9 for the full original-vs-clone gap analysis. Implement in this order:
 | Multiplayer up to 15 players (Colyseus) | Matches |
 | In-meeting text chat (multiplayer, alive players only) | Matches (no Quick Chat presets, no separate ghost channel) — added Session 13 |
 
+### ✅ Implemented correctly (added later — this table was stale as of Session 13)
+| Feature | Notes |
+|---|---|
+| **Sabotage** (Lights/Comms/Doors/Reactor/O2) | Server-authoritative in multiplayer (`AmongGasRoom.handleSabotage`); client-driven bot AI in Freeplay (`GameScene.impostorSabotageAI`). Reactor/O2 unfixed → impostor wins, matching original. See `replit.md` § Sabotage. |
+
 ### ❌ Missing — high gameplay impact
 | Gap | What original does |
 |---|---|
-| **Sabotage** | Lights (vision → near-zero), O2/Reactor (timed critical → crew must fix or lose), Comms (hides task list), Doors (locks rooms) |
-| **Sabotage win condition** | Impostor wins if O2 or Reactor timer expires |
 | **Venting** | Impostor-only: enter vent network, travel between nodes, emerge elsewhere |
 
 ### ⚠️ Missing — medium impact

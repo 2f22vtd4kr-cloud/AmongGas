@@ -75,6 +75,7 @@ export const AMBIENT_CENTRES: Record<string, { x: number; y: number; radius: num
 export const SABOTAGE_COOLDOWN_MS = 30_000;
 export const CRITICAL_SABOTAGE_MS = 45_000; // reactor / o2 meltdown window
 export const DOORS_LOCK_MS        = 15_000;
+export const SABOTAGE_SAFETY_MS   = 60_000; // lights / comms auto-clear if nobody fixes them
 export const SABOTAGE_ROOM_KEY: Record<'lights' | 'comms' | 'reactor' | 'o2', string> = {
   lights:  'electrical_room',
   comms:   'comms3',

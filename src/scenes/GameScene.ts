@@ -10,6 +10,7 @@ import {
   AMBIENT_CENTRES, TASK_TITLES, CAMERA_ZOOM,
   CREW_VISION, IMP_VISION, CREW_VISION_SABOTAGED,
   SABOTAGE_ROOM_KEY, SABOTAGE_LABELS,
+  SABOTAGE_COOLDOWN_MS, CRITICAL_SABOTAGE_MS, DOORS_LOCK_MS, SABOTAGE_SAFETY_MS,
 } from '../settings';
 
 type SabotageType = '' | 'lights' | 'comms' | 'reactor' | 'o2' | 'doors';
@@ -171,11 +172,18 @@ export class GameScene extends Phaser.Scene {
   private sabotageBanner?: Phaser.GameObjects.Container;
   private sabotageBannerText?: Phaser.GameObjects.Text;
 
-  // --- sabotage (multiplayer only; server-authoritative) ---
+  // --- sabotage ---
+  // In multiplayer this state is server-authoritative and arrives via
+  // SABOTAGE_START/SABOTAGE_END messages. In Freeplay there is no server, so
+  // the bot impostor drives the exact same state locally (see
+  // impostorSabotageAI/triggerBotSabotage below) — every other system that
+  // reads these fields (fog, task list, door locks, banner) works unchanged
+  // in both modes.
   private sabotageType: SabotageType = '';
   private sabotageEndsAt = 0;
   private sabotageCooldownUntil = 0;
   private sabotageLockedTasks: string[] = [];
+  private sabotageTimerEvt?: Phaser.Time.TimerEvent;
   private nearSabotagePanel = false;
 
   // --- input ---
@@ -221,6 +229,19 @@ export class GameScene extends Phaser.Scene {
     const playerName  = this.registry.get('playerName')  as string ?? 'Crewmate';
     const playerColor = this.registry.get('playerColor') as string ?? 'Red';
     this.isMultiplayer = this.registry.get('gameMode') === 'online';
+
+    // Phaser reuses the same GameScene instance across replays (MenuScene →
+    // GamePreloadScene → GameScene again), so per-round state that isn't
+    // otherwise reassigned below must be explicitly reset here — otherwise a
+    // second Freeplay round could inherit a stale gameOver flag or leftover
+    // sabotage state (e.g. locked tasks) from the previous round.
+    this.gameOver = false;
+    this.sabotageTimerEvt?.remove(false);
+    this.sabotageTimerEvt = undefined;
+    this.sabotageType = '';
+    this.sabotageEndsAt = 0;
+    this.sabotageCooldownUntil = 0;
+    this.sabotageLockedTasks = [];
 
     // ── Background world image ──
     const bg = this.add.image(WORLD_WIDTH / 2, WORLD_HEIGHT / 2, 'map_bg');
@@ -328,11 +349,22 @@ export class GameScene extends Phaser.Scene {
       this.sound.play('sfx_roundstart', { volume: 0.8 });
     });
 
-    // ── Impostor kill AI timer (Freeplay only — multiplayer kills are server-driven, Phase 3) ──
+    // ── Impostor AI timers (Freeplay only — multiplayer kills/sabotage are server-driven) ──
     if (!this.isMultiplayer) {
       this.time.addEvent({
         delay: 8000,
         callback: this.impostorAct,
+        callbackScope: this,
+        loop: true,
+      });
+      // Separate, slower-ticking timer for sabotage so it doesn't compete
+      // 1:1 with the kill-attempt cadence above — the bot impostor rolls a
+      // chance to sabotage each tick once off cooldown, giving an average
+      // gap similar to the cooldown itself rather than firing the instant
+      // it's available.
+      this.time.addEvent({
+        delay: 10_000,
+        callback: this.impostorSabotageAI,
         callbackScope: this,
         loop: true,
       });
@@ -1076,15 +1108,13 @@ export class GameScene extends Phaser.Scene {
     }
     if (this.emergencyCooldown > 0) this.emergencyCooldown -= delta;
 
-    // Sabotage: live countdown banner + button dim/enable state
-    if (this.isMultiplayer) {
-      if (this.sabotageType !== '') this.updateSabotageBanner();
-      if (this.sabotageBtn) {
-        const key = this.sabotageType === '' && Date.now() >= this.sabotageCooldownUntil
-          ? 'ui_sabotage_icon' : 'ui_sabotage_dim';
-        const img = this.sabotageBtn.list[0] as Phaser.GameObjects.Image;
-        if (img.texture.key !== key) img.setTexture(key);
-      }
+    // Sabotage: live countdown banner (both modes) + button dim/enable state (multiplayer's impostor button only)
+    if (this.sabotageType !== '') this.updateSabotageBanner();
+    if (this.sabotageBtn) {
+      const key = this.sabotageType === '' && Date.now() >= this.sabotageCooldownUntil
+        ? 'ui_sabotage_icon' : 'ui_sabotage_dim';
+      const img = this.sabotageBtn.list[0] as Phaser.GameObjects.Image;
+      if (img.texture.key !== key) img.setTexture(key);
     }
 
     // Player
@@ -1123,12 +1153,12 @@ export class GameScene extends Phaser.Scene {
     this.updateTaskBar();
 
     // 'comms' sabotage blacks out the task list + compass until fixed
-    const commsDown = this.isMultiplayer && this.sabotageType === 'comms';
+    const commsDown = this.sabotageType === 'comms';
     this.setCommsDownVisual(commsDown);
     if (!commsDown) this.updateTaskArrows();
 
     // Sabotage visual effects that depend on world-sprite positions
-    if (this.isMultiplayer && this.sabotageLockedTasks.length > 0) this.updateDoorLocks();
+    if (this.sabotageLockedTasks.length > 0) this.updateDoorLocks();
     else if (this.doorLockMarkers.size > 0) this.updateDoorLocks(); // clears leftovers when doors sabotage ends
 
     // Win check (Freeplay only — multiplayer win conditions are decided by the server, Phase 3)
@@ -1351,7 +1381,7 @@ export class GameScene extends Phaser.Scene {
       let nearestTask: TaskDef | null = null;
       let nearestDist = Infinity;
       for (const t of this.tasks) {
-        if (t.completed) continue;
+        if (t.completed || this.sabotageLockedTasks.includes(t.id)) continue;
         const d = Phaser.Math.Distance.Between(px, py, t.x, t.y);
         if (d < INTERACT_RADIUS && d < nearestDist) { nearestTask = t; nearestDist = d; }
       }
@@ -1373,7 +1403,7 @@ export class GameScene extends Phaser.Scene {
 
     // Check tasks
     for (const t of this.tasks) {
-      if (t.completed) continue;
+      if (t.completed || this.sabotageLockedTasks.includes(t.id)) continue;
       const d = Phaser.Math.Distance.Between(px, py, t.x, t.y);
       if (d < INTERACT_RADIUS && d < closest.dist) {
         closest = { dist: d, task: t, corpse: null };
@@ -1404,7 +1434,7 @@ export class GameScene extends Phaser.Scene {
     // Sabotage fix panel — any alive player standing near the active
     // sabotage's room can fix it (doors has no manual fix, it just expires).
     this.nearSabotagePanel = false;
-    if (this.isMultiplayer && FIXABLE_SABOTAGE_TYPES.includes(this.sabotageType as typeof FIXABLE_SABOTAGE_TYPES[number])) {
+    if (FIXABLE_SABOTAGE_TYPES.includes(this.sabotageType as typeof FIXABLE_SABOTAGE_TYPES[number])) {
       const zone = AMBIENT_CENTRES[SABOTAGE_ROOM_KEY[this.sabotageType as keyof typeof SABOTAGE_ROOM_KEY]];
       if (zone && Phaser.Math.Distance.Between(px, py, zone.x, zone.y) < zone.radius) {
         this.nearSabotagePanel = true;
@@ -1471,9 +1501,10 @@ export class GameScene extends Phaser.Scene {
 
     if (!this.player.isAlive) return;
 
-    // Sabotage fix panel (multiplayer only)
+    // Sabotage fix panel
     if (this.nearSabotagePanel) {
-      NetworkManager.room?.send('SABOTAGE_FIX');
+      if (this.isMultiplayer) NetworkManager.room?.send('SABOTAGE_FIX');
+      else this.fixSabotageLocal();
       return;
     }
 
@@ -1495,6 +1526,10 @@ export class GameScene extends Phaser.Scene {
 
   private openTask(task: TaskDef) {
     if (task.completed) return;
+    // 'doors' sabotage locks two random tasks until it expires (matches the
+    // server's TASK_DONE rejection in multiplayer — enforced here too so
+    // Freeplay can't just open a locked task's mini-game while it's locked).
+    if (this.sabotageLockedTasks.includes(task.id)) return;
     this.scene.pause();
     this.scene.launch(this.getTaskScene(task.type), { taskId: task.id, gameScene: this });
   }
@@ -1806,6 +1841,83 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  /**
+   * Freeplay-only sabotage AI. Mirrors AmongGasRoom.handleSabotage's rules
+   * (one active sabotage at a time, shared cooldown after triggering) but
+   * runs entirely client-side since Freeplay has no server. Ticks every
+   * 10s via the timer set up in create(); rolls a chance to fire so
+   * sabotage doesn't fire the instant it comes off cooldown.
+   */
+  private impostorSabotageAI() {
+    if (this.gameOver) return;
+    const imp = this.bots.find(b => b.isImpostor && b.isAlive);
+    if (!imp) return;
+    if (this.sabotageType !== '' || Date.now() < this.sabotageCooldownUntil) return;
+    if (Math.random() > 0.4) return; // ~40% chance per 10s tick once available
+
+    const weighted: Exclude<SabotageType, ''>[] =
+      ['lights', 'lights', 'comms', 'comms', 'doors', 'doors', 'reactor', 'o2'];
+    const type = weighted[Phaser.Math.Between(0, weighted.length - 1)];
+    this.triggerBotSabotage(type);
+  }
+
+  /** Freeplay equivalent of the server's handleSabotage — same durations/effects, driven locally. */
+  private triggerBotSabotage(type: Exclude<SabotageType, ''>) {
+    const now = Date.now();
+    this.sabotageType = type;
+    this.sabotageCooldownUntil = now + SABOTAGE_COOLDOWN_MS;
+
+    let durationMs: number;
+    if (type === 'doors') {
+      durationMs = DOORS_LOCK_MS;
+      const incomplete = this.tasks.filter(t => !t.completed);
+      const pool = incomplete.length >= 2 ? incomplete : this.tasks;
+      const shuffled = [...pool].sort(() => Math.random() - 0.5);
+      this.sabotageLockedTasks = shuffled.slice(0, Math.min(2, shuffled.length)).map(t => t.id);
+    } else if (type === 'reactor' || type === 'o2') {
+      durationMs = CRITICAL_SABOTAGE_MS;
+    } else {
+      durationMs = SABOTAGE_SAFETY_MS;
+    }
+
+    this.sabotageEndsAt = now + durationMs;
+    this.updateSabotageBanner();
+    this.sound.play('sfx_emergency', { volume: 0.5 });
+
+    this.sabotageTimerEvt?.remove(false);
+    this.sabotageTimerEvt = this.time.delayedCall(durationMs, () => this.onSabotageTimeoutLocal(type));
+  }
+
+  /** Freeplay equivalent of the server's onSabotageTimeout. */
+  private onSabotageTimeoutLocal(type: Exclude<SabotageType, ''>) {
+    if (this.sabotageType !== type) return; // already fixed
+
+    if (type === 'reactor' || type === 'o2') {
+      this.clearSabotageLocal();
+      this.endGame('impostor');
+      return;
+    }
+    this.clearSabotageLocal();
+  }
+
+  /** Freeplay equivalent of the server's handleSabotageFix (proximity already checked by the caller via nearSabotagePanel). */
+  private fixSabotageLocal() {
+    if (this.sabotageType === '' || this.sabotageType === 'doors') return;
+    this.sound.play('sfx_task_done', { volume: 0.7 });
+    this.clearSabotageLocal();
+  }
+
+  /** Freeplay equivalent of the server's clearSabotage. */
+  private clearSabotageLocal() {
+    if (this.sabotageType === '') return;
+    this.sabotageTimerEvt?.remove(false);
+    this.sabotageTimerEvt = undefined;
+    this.sabotageType = '';
+    this.sabotageEndsAt = 0;
+    this.sabotageLockedTasks = [];
+    this.updateSabotageBanner();
+  }
+
   private attemptKill() {
     if (this.killCooldown > 0 || !this.player.isAlive || this.gameOver) return;
     if (!this.isMultiplayer || !this.player.isImpostor) return;
@@ -1832,7 +1944,7 @@ export class GameScene extends Phaser.Scene {
     for (const bot of this.bots) {
       if (!bot.isAlive || bot.isImpostor) continue;
       for (const task of this.tasks) {
-        if (task.completed) continue;
+        if (task.completed || this.sabotageLockedTasks.includes(task.id)) continue;
         if (Phaser.Math.Distance.Between(bot.x, bot.y, task.x, task.y) < INTERACT_RADIUS) {
           this.completeTask(task.id);
           break; // one task per bot per frame is enough

@@ -83,6 +83,15 @@ Both are also configured as Replit workflows:
 
 Complete **8 tasks** before the impostor bot kills enough crewmates to win.
 
+## Sabotage
+
+The impostor's second tool (alongside kill): 5 types — **Lights** (crews' vision collapses to `CREW_VISION_SABOTAGED`; impostor vision unaffected), **Comms** (task list/compass hidden), **Doors** (2 random tasks locked for `DOORS_LOCK_MS`, no manual fix — just expires), **Reactor**/**O2** (critical — impostor wins outright if not fixed within `CRITICAL_SABOTAGE_MS`). One sabotage active at a time; `SABOTAGE_COOLDOWN_MS` cooldown starts the moment it's *triggered*, not when it resolves. Lights/Comms auto-clear after `SABOTAGE_SAFETY_MS` if nobody fixes them. Fix panels reuse the existing `AMBIENT_CENTRES` room-centre points (no new map data invented) — walk into the room and press **E**.
+
+- **Multiplayer**: fully server-authoritative — `server/rooms/AmongGasRoom.ts` (`handleSabotage`/`handleSabotageFix`/`onSabotageTimeout`), state replicated via `GameRoomState.sabotageType/sabotageEndsAt/sabotageLockedTasks`. Impostor player triggers via a HUD button + type menu (`GameScene.buildSabotageMenu`); everyone sees a top banner (`buildSabotageBanner`).
+- **Freeplay**: same rules, driven client-side since there's no server — the bot impostor rolls a sabotage chance every 10s once off cooldown (`GameScene.impostorSabotageAI` → `triggerBotSabotage`/`onSabotageTimeoutLocal`/`clearSabotageLocal`/`fixSabotageLocal`). All the shared systems (fog, task list, door-lock markers, banner) read the same `sabotageType`/`sabotageEndsAt`/`sabotageLockedTasks` fields regardless of mode, so they needed no duplication — only the trigger/fix source differs (network message vs. local AI/interact).
+- Constants mirrored between `src/settings.ts` and `server/rooms/AmongGasRoom.ts` — keep both in sync if tuning durations.
+- **Not implemented**: Venting (impostor-only vent network traversal) — see follow-up task.
+
 ## User preferences
 
 - Port the Python/Pygame game to TypeScript + Phaser 3
