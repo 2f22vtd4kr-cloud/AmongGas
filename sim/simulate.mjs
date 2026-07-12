@@ -86,12 +86,21 @@ function runGame(workerId, gameId) {
   let meetingCooldown = 30000, meetings = 0;
 
   // ── Move entity in its current random direction ────────────────────────────
-  function moveEntity(ent, speed) {
+  // taskTarget: if provided, 25% chance to seek it when changing direction (crew bot task bias)
+  function moveEntity(ent, speed, taskTarget) {
     ent.changeTimer += DT;
     if (ent.changeTimer >= ent.changeInterval) {
       ent.changeTimer = 0;
       ent.changeInterval = rng(1500, 3500);
-      ent.dir = randDir();
+      // 25% task-seek bias for crew bots — models how map corridors funnel bots near tasks
+      if (taskTarget && !taskTarget.completed && Math.random() < 0.25) {
+        const dx = taskTarget.cx - ent.x, dy = taskTarget.cy - ent.y;
+        const adx = Math.abs(dx), ady = Math.abs(dy);
+        if (adx > ady) ent.dir = dx > 0 ? 'right' : 'left';
+        else           ent.dir = dy > 0 ? 'down'  : 'up';
+      } else {
+        ent.dir = randDir();
+      }
     }
     let dx = 0, dy = 0;
     if (ent.dir === 'up')    dy = -1;
@@ -115,6 +124,13 @@ function runGame(workerId, gameId) {
     player.x = Math.max(0, Math.min(WORLD_W, player.x + (dx/d) * PLAYER_SPEED * dt_s));
     player.y = Math.max(0, Math.min(WORLD_H, player.y + (dy/d) * PLAYER_SPEED * dt_s));
   }
+
+  // Pre-assign each crew bot to a task so they spread out rather than all clustering
+  // 25% of the time each direction-change, a crew bot heads directly toward its target task.
+  // This models the loose task-following that happens in real play (map corridors + task prompts).
+  const botTaskTarget = bots.map((b, i) =>
+    !b.isImpostor ? activeTasks[i % activeTasks.length] : null
+  );
 
   // Task interactions: player or crewmate bots complete tasks on proximity
   function checkTasks() {
@@ -153,21 +169,24 @@ function runGame(workerId, gameId) {
     }
   }
 
-  // Meeting simulation — fixed: ties → no ejection (skip)
+  // Meeting simulation — includes player as vote candidate (id=-1), mirrors MeetingScene logic
   function simulateMeeting() {
     meetings++;
     const aliveBots = bots.filter(b => b.isAlive);
     if (aliveBots.length === 0) return;
 
+    // All alive voters: bot ids + player id (-1 if alive)
+    const voterIds = aliveBots.map(b => b.id);
+    if (player.isAlive) voterIds.push(-1);
+
     const tally = new Map();
-    // Bots vote randomly; player vote omitted (they'd pick via UI)
-    for (const v of aliveBots) {
-      const others = aliveBots.filter(x => x.id !== v.id);
+    for (const vid of voterIds) {
+      const others = voterIds.filter(x => x !== vid);
       if (others.length === 0 || Math.random() < 0.15) {
         tally.set('skip', (tally.get('skip') ?? 0) + 1);
       } else {
         const pick = others[Math.floor(Math.random() * others.length)];
-        tally.set(pick.id, (tally.get(pick.id) ?? 0) + 1);
+        tally.set(pick, (tally.get(pick) ?? 0) + 1);
       }
     }
 
@@ -176,11 +195,15 @@ function runGame(workerId, gameId) {
       if (cnt > maxVotes) { maxVotes = cnt; ejected = k; tied = false; }
       else if (cnt === maxVotes && k !== 'skip') { tied = true; }
     }
-    if (tied) ejected = 'skip'; // Fixed: ties → no ejection
+    if (tied) ejected = 'skip'; // ties → no ejection
 
     if (ejected !== 'skip') {
-      const bot = bots.find(b => b.id === ejected);
-      if (bot) bot.isAlive = false;
+      if (ejected === -1) {
+        player.isAlive = false; // player ejected — mirrors resolveMeeting(ejectedId === -1)
+      } else {
+        const bot = bots.find(b => b.id === ejected);
+        if (bot) bot.isAlive = false;
+      }
     }
   }
 
@@ -200,7 +223,9 @@ function runGame(workerId, gameId) {
   while (!gameOver && elapsed < MAX_SIM_MS) {
     elapsed += DT;
     movePlayer();
-    for (const bot of bots) { if (bot.isAlive) moveEntity(bot, BOT_SPEED); }
+    for (let i = 0; i < bots.length; i++) {
+      if (bots[i].isAlive) moveEntity(bots[i], BOT_SPEED, botTaskTarget[i]);
+    }
     checkTasks();
     killTimer -= DT;
     if (killTimer <= 0) { killTimer = KILL_INTERVAL; impostorAct(); }
@@ -214,7 +239,12 @@ function runGame(workerId, gameId) {
 
   // ── Post-game checks ───────────────────────────────────────────────────────
   if (!gameOver) {
-    bugs.push(`HANG: game never ended after ${MAX_SIM_MS/1000}s — possible win-condition deadlock`);
+    const aliveCrewsEnd = bots.filter(b => b.isAlive && !b.isImpostor).length;
+    const aliveImpsEnd  = bots.filter(b => b.isAlive &&  b.isImpostor).length;
+    bugs.push(
+      `HANG: game never ended after ${MAX_SIM_MS/1000}s — ` +
+      `tasks=${tasksDone}/${NO_OF_MISSIONS} crew=${aliveCrewsEnd} imp=${aliveImpsEnd} playerAlive=${player.isAlive} meetings=${meetings}`
+    );
     winner = 'timeout';
   }
   if (tasksDone > NO_OF_MISSIONS) {

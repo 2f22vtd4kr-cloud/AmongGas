@@ -28,9 +28,13 @@ export class MeetingScene extends Phaser.Scene {
 
   init(data: MeetingData) {
     this.gameScene = data.gameScene;
+    this.playerAlive = data.playerAlive;  // ← was never stored; dead player showed in list
 
+    // Dead players attend as ghosts: they are not vote targets and cannot vote
     this.voters = [
-      { id: -1, name: data.playerName, color: data.playerColor, isPlayer: true },
+      ...(data.playerAlive
+        ? [{ id: -1, name: data.playerName, color: data.playerColor, isPlayer: true }]
+        : []),
       ...data.aliveBots.map(b => ({ ...b, isPlayer: false })),
     ];
     this.votes.clear();
@@ -62,12 +66,19 @@ export class MeetingScene extends Phaser.Scene {
     // Voter list — single column for portrait
     this.buildVoterList();
 
-    // Skip button — large touch target
-    const skipBtn = this.add.text(W / 2, H - 30, '⏭  Skip Vote', {
-      fontSize: '24px', color: '#aaaaaa', backgroundColor: '#333',
-      padding: { x: 24, y: 14 }, fontFamily: 'Arial',
-    }).setOrigin(0.5, 1).setInteractive({ useHandCursor: true });
-    skipBtn.on('pointerdown', () => this.castVote('skip'));
+    // Skip button — only for living players; dead players are spectators
+    if (this.playerAlive) {
+      const skipBtn = this.add.text(W / 2, H - 30, '⏭  Skip Vote', {
+        fontSize: '24px', color: '#aaaaaa', backgroundColor: '#333',
+        padding: { x: 24, y: 14 }, fontFamily: 'Arial',
+      }).setOrigin(0.5, 1).setInteractive({ useHandCursor: true });
+      skipBtn.on('pointerdown', () => this.castVote('skip'));
+    } else {
+      this.add.text(W / 2, H - 30, '☠  You are dead — spectating only', {
+        fontSize: '20px', color: '#555555', fontFamily: 'Arial',
+        padding: { x: 24, y: 14 },
+      }).setOrigin(0.5, 1);
+    }
 
     this.time.addEvent({ delay: 1000, callback: this.tick, callbackScope: this, loop: true });
   }
@@ -172,7 +183,7 @@ export class MeetingScene extends Phaser.Scene {
   }
 
   private castVote(target: number | 'skip') {
-    if (this.votedFor !== null || this.phase !== 'vote') return;
+    if (!this.playerAlive || this.votedFor !== null || this.phase !== 'vote') return;
     this.votedFor = target;
     this.votes.set(-1, target);
 
