@@ -119,8 +119,9 @@ export class MenuScene extends Phaser.Scene {
         this.registry.set('gameMode', 'Freeplay');
         this.showCharSelect();
         break;
-      case 1: // Online - not yet implemented
-        this.showNotice('Online multiplayer coming soon!');
+      case 1: // Online multiplayer — go through char select then lobby
+        this.registry.set('gameMode', 'online');
+        this.showCharSelect();
         break;
       case 2: this.showHelp(); break;
       case 3: this.showCredits(); break;
@@ -295,7 +296,12 @@ export class MenuScene extends Phaser.Scene {
     this.registry.set('playerName', this.playerName || 'Crewmate');
     this.registry.set('playerColor', this.playerColor);
     this.music?.stop();
-    this.scene.start('GamePreloadScene');
+    const mode = this.registry.get('gameMode') as string;
+    if (mode === 'online') {
+      this.scene.start('LobbyScene');
+    } else {
+      this.scene.start('GamePreloadScene');
+    }
   }
 
   private cleanupInput() {
