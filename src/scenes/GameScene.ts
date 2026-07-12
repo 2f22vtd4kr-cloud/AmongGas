@@ -768,7 +768,7 @@ export class GameScene extends Phaser.Scene {
    * Mirrors the positions in buildHUD() exactly.
    */
   private handleActionButtonTap(px: number, py: number) {
-    if (!this.player.isAlive || this.gameOver) return;
+    if (this.gameOver) return;
     const H = this.scale.height;
     const actionX = 68;   // mirrored to left side with joystick on right
     const sb = this.safeBot;
@@ -829,9 +829,9 @@ export class GameScene extends Phaser.Scene {
       // Bots
       for (const bot of this.bots) bot.update(delta);
 
-      // Bot task completion — crew bots complete tasks they walk over, just like the player.
-      // Without this, any game where the player dies before finishing all tasks is a deadlock:
-      // tasks never complete, impostor can't achieve majority, game never ends.
+      // Bot task completion — crew bots complete tasks they walk over, just like
+      // the player (alive or ghost). All crewmates contribute to the shared task
+      // bar in the original game; this mirrors that behaviour.
       this.botCheckTasks();
     }
 
@@ -1047,10 +1047,26 @@ export class GameScene extends Phaser.Scene {
   }
 
   private detectNearby() {
+    // ── Ghost mode: dead crewmates can still complete tasks (original Among Us) ──
     if (!this.player.isAlive) {
-      this.interactPrompt.setVisible(false);
-      this.nearbyTask = null;
+      const px = this.player.x, py = this.player.y;
+      let nearestTask: TaskDef | null = null;
+      let nearestDist = Infinity;
+      for (const t of this.tasks) {
+        if (t.completed) continue;
+        const d = Phaser.Math.Distance.Between(px, py, t.x, t.y);
+        if (d < INTERACT_RADIUS && d < nearestDist) { nearestTask = t; nearestDist = d; }
+      }
+      this.nearbyTask = nearestTask;
       this.nearbyCorpse = null;
+      if (nearestTask) {
+        this.interactPrompt.setText(`[E] ${nearestTask.title}`).setVisible(true);
+      } else {
+        this.interactPrompt.setVisible(false);
+      }
+      this.useBtn.setVisible(!!nearestTask);
+      this.reportBtn.setVisible(false);
+      this.killBtn.setVisible(false);
       return;
     }
 
@@ -1135,14 +1151,17 @@ export class GameScene extends Phaser.Scene {
   }
 
   private tryInteract() {
-    if (!this.player.isAlive || this.gameOver) return;
+    if (this.gameOver) return;
 
+    // Ghosts can open tasks but not call emergency meetings
     if (this.nearbyTask) {
       this.openTask(this.nearbyTask);
       return;
     }
 
-    // Emergency button
+    if (!this.player.isAlive) return;
+
+    // Emergency button (alive players only)
     const eDist = Phaser.Math.Distance.Between(this.player.x, this.player.y, this.emergencyPos.x, this.emergencyPos.y);
     if (eDist < INTERACT_RADIUS * 1.5) {
       this.triggerEmergency(false);
@@ -1237,7 +1256,7 @@ export class GameScene extends Phaser.Scene {
   // ────────────────── Meetings ──────────────────
 
   private triggerEmergency(isReport: boolean) {
-    if (this.gameOver || this.emergencyCooldown > 0) return;
+    if (!this.player.isAlive || this.gameOver || this.emergencyCooldown > 0) return;
 
     // In multiplayer the server drives the meeting — send the action and wait
     // for the MEETING_STARTED broadcast (which fires for all clients, including
