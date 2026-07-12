@@ -86,15 +86,28 @@ function runGame(workerId, gameId) {
   let meetingCooldown = 30000, meetings = 0;
 
   // ── Move entity in its current random direction ────────────────────────────
-  // taskTarget: if provided, 25% chance to seek it when changing direction (crew bot task bias)
-  function moveEntity(ent, speed, taskTarget) {
+  // taskTarget: pre-assigned task for crew bots (25% seek bias, cycles to next when done)
+  // homeTarget: {x,y} to occasionally home toward — used for impostor homing (20% bias)
+  function moveEntity(ent, speed, taskTarget, homeTarget) {
     ent.changeTimer += DT;
     if (ent.changeTimer >= ent.changeInterval) {
       ent.changeTimer = 0;
       ent.changeInterval = rng(1500, 3500);
-      // 25% task-seek bias for crew bots — models how map corridors funnel bots near tasks
-      if (taskTarget && !taskTarget.completed && Math.random() < 0.25) {
-        const dx = taskTarget.cx - ent.x, dy = taskTarget.cy - ent.y;
+
+      // If assigned task is done, fall through to the next incomplete task
+      const effectiveTask = (taskTarget && !taskTarget.completed)
+        ? taskTarget
+        : activeTasks.find(t => !t.completed) ?? null;
+
+      if (effectiveTask && Math.random() < 0.25) {
+        // Crew bot task-seek: 25% chance each direction change
+        const dx = effectiveTask.cx - ent.x, dy = effectiveTask.cy - ent.y;
+        const adx = Math.abs(dx), ady = Math.abs(dy);
+        if (adx > ady) ent.dir = dx > 0 ? 'right' : 'left';
+        else           ent.dir = dy > 0 ? 'down'  : 'up';
+      } else if (homeTarget && Math.random() < 0.20) {
+        // Impostor homing: 20% chance to step toward nearest prey
+        const dx = homeTarget.x - ent.x, dy = homeTarget.y - ent.y;
         const adx = Math.abs(dx), ady = Math.abs(dy);
         if (adx > ady) ent.dir = dx > 0 ? 'right' : 'left';
         else           ent.dir = dy > 0 ? 'down'  : 'up';
@@ -224,7 +237,22 @@ function runGame(workerId, gameId) {
     elapsed += DT;
     movePlayer();
     for (let i = 0; i < bots.length; i++) {
-      if (bots[i].isAlive) moveEntity(bots[i], BOT_SPEED, botTaskTarget[i]);
+      if (!bots[i].isAlive) continue;
+      // Impostor: compute nearest alive prey as home target
+      let homeTarget = null;
+      if (bots[i].isImpostor) {
+        let minD = Infinity;
+        for (const b of bots) {
+          if (!b.isAlive || b.isImpostor) continue;
+          const d = dist(bots[i], b);
+          if (d < minD) { minD = d; homeTarget = { x: b.x, y: b.y }; }
+        }
+        if (player.isAlive) {
+          const pd = dist(bots[i], player);
+          if (pd < minD) homeTarget = { x: player.x, y: player.y };
+        }
+      }
+      moveEntity(bots[i], BOT_SPEED, botTaskTarget[i], homeTarget);
     }
     checkTasks();
     killTimer -= DT;

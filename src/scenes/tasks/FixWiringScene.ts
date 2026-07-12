@@ -44,7 +44,7 @@ export class FixWiringScene extends Phaser.Scene {
 
     // Close button — larger touch target
     const close = this.add.text(px + pw - 12, py + 12, '✕', {
-      fontSize: '28px', color: '#fff', backgroundColor: '#444', padding: { x: 10, y: 4 },
+      fontSize: '28px', color: '#fff', backgroundColor: '#444', padding: { x: 10, y: 10 },
     }).setOrigin(1, 0).setInteractive();
     close.on('pointerdown', () => this.closeTask());
 

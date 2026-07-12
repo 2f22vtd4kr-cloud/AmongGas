@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import type { GameScene } from '../GameScene';
+import { fitContain } from '../../utils/imageFit';
 
 interface TaskData { taskId: string; gameScene: GameScene; }
 
@@ -29,12 +30,12 @@ export class StartReactorScene extends Phaser.Scene {
     }).setOrigin(0.5, 0);
 
     const closeBtn = this.add.text(px+pw-12, py+12, '✕', {
-      fontSize: '28px', color: '#fff', backgroundColor: '#444', padding: { x: 10, y: 4 },
+      fontSize: '28px', color: '#fff', backgroundColor: '#444', padding: { x: 10, y: 10 },
     }).setOrigin(1,0).setInteractive();
     closeBtn.on('pointerdown', () => this.closeTask());
 
     if (this.textures.exists('task_reactor_base1')) {
-      this.add.image(W/2, H/2, 'task_reactor_base1').setDisplaySize(pw, ph).setDepth(-1);
+      fitContain(this.add.image(W/2, H/2, 'task_reactor_base1'), pw, ph).setDepth(-1);
     }
 
     // 3×2 grid — buttons sized relative to panel

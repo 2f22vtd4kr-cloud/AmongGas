@@ -771,6 +771,11 @@ export class GameScene extends Phaser.Scene {
     // Bots
     for (const bot of this.bots) bot.update(delta);
 
+    // Bot task completion — crew bots complete tasks they walk over, just like the player.
+    // Without this, any game where the player dies before finishing all tasks is a deadlock:
+    // tasks never complete, impostor can't achieve majority, game never ends.
+    this.botCheckTasks();
+
     // Keyboard interactions
     if (Phaser.Input.Keyboard.JustDown(this.eKey)) this.tryInteract();
     if (Phaser.Input.Keyboard.JustDown(this.rKey)) this.tryReport();
@@ -1071,6 +1076,19 @@ export class GameScene extends Phaser.Scene {
   }
 
   // ────────────────── Win Conditions ──────────────────
+
+  private botCheckTasks() {
+    for (const bot of this.bots) {
+      if (!bot.isAlive || bot.isImpostor) continue;
+      for (const task of this.tasks) {
+        if (task.completed) continue;
+        if (Phaser.Math.Distance.Between(bot.x, bot.y, task.x, task.y) < INTERACT_RADIUS) {
+          this.completeTask(task.id);
+          break; // one task per bot per frame is enough
+        }
+      }
+    }
+  }
 
   private checkWinConditions() {
     if (this.gameOver) return;
