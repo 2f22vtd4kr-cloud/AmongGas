@@ -41,9 +41,13 @@ export const KILL_RADIUS = 80;
 export const INTERACT_RADIUS = 120;
 export const REPORT_RADIUS = 150;
 
-// Night / light mask
-export const NIGHT_COLOR = 0x141414;
-export const LIGHT_RADIUS = 500;
+// Vision / fog of war (world-space radii; multiply by camera.zoom for screen-space px)
+// Crewmate default: ~200 world units → ~290 px at zoom 1.45 (leaves dark corners visible)
+// Impostor default: ~280 world units → ~406 px at zoom 1.45 (wider awareness)
+// Ghosts see the full map (no fog).
+export const NIGHT_COLOR  = 0x141414;
+export const CREW_VISION  = 200;   // world units — crewmate sight radius
+export const IMP_VISION   = 280;   // world units — impostor sight radius
 
 // Footstep rate (ms between steps)
 export const STEPPING_RATE = 230;

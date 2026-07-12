@@ -252,6 +252,29 @@ Phase 4 code is wired and TypeScript-clean. To activate it in production:
   - `shareRoom()`: hardcoded `'AmongGasBot'` replaced with `import.meta.env.VITE_BOT_USERNAME ?? 'AmongGasBot'`
 - TypeScript: clean (`tsc --noEmit` passes)
 
+### Session 12 (2026-07-12) — Ghost task fix + Fog of war + Gap analysis
+
+**Ghost task completion (fixed):**
+- `detectNearby()`: dead players now scan for nearby incomplete tasks and show `[E]` prompt + USE button (instead of early-return). Report/Kill/Emergency blocked for ghosts.
+- `tryInteract()`: removed blanket `!isAlive` guard; ghosts can open task mini-games but not call meetings.
+- `handleActionButtonTap()`: removed `!isAlive` guard; USE button tap works for ghosts.
+- `triggerEmergency()`: added `!isAlive` guard — ghosts cannot call meetings via any code path.
+- Matches original Among Us: dead crewmates (ghosts) can complete tasks and those completions count.
+
+**Fog of war (added — `src/scenes/GameScene.ts`, `src/settings.ts`):**
+- `CREW_VISION = 200` world units (~290 px at zoom 1.45), `IMP_VISION = 280` world units (~406 px).
+- Two-layer `GeometryMask invertAlpha=true` approach (works Canvas + WebGL):
+  - `fogInner` (alpha 0.92, radius = baseR) — main darkness
+  - `fogOuter` (alpha 0.40, radius = baseR × 1.4) — soft-edge transition zone
+- `setupFog()` called from `create()` after `setupUiCamera()`. `updateFog()` called each frame after `player.update()`.
+- Ghosts see full map: both layers hidden when `!player.isAlive`.
+- Mask graphics use `this.add.graphics().setVisible(false)` — GeometryMask reads path data regardless of visibility; the `{ add: false }` option was removed from Phaser 3.90 typings.
+- `uiCamera.ignore()` called on both fog layers + both mask graphics so the HUD renders above fog.
+
+**Original-vs-clone gap analysis (see §9):**
+- Documented all ✅ / ❌ / ⚠️ gaps vs original Among Us.
+- Priority order: chat → sabotage → venting → admin/security.
+
 ### Session 11 (2026-07-12) — Bug fix + full multiplayer integration test
 **Bug fixed — `checkWinConditions` impostor comparison (`server/rooms/AmongGasRoom.ts`)**
 
@@ -274,6 +297,56 @@ Tests run against the live Colyseus server with real `@colyseus/sdk` WebSocket c
 **All 67/67 checks pass.**
 
 ### Next Session Priorities
-1. **BotFather setup** — create bot, register Mini App, set `/play` command, update `VITE_BOT_USERNAME` env var, then test Phase 4 inside real Telegram
-2. **Two-tab manual smoke test** — open two browser tabs, join same room, play a full live game to verify the client-side wiring from Session 9 (kills, meetings, VictoryScene) works visually
-3. **Fix red player visor rendering green** (see §5 — cosmetic, low priority)
+See §9 for the full original-vs-clone gap analysis. Implement in this order:
+1. **Fog of war** — ✅ DONE (Session 12)
+2. **In-meeting chat** — no text/quick-chat at all; discussion phase is silent. Core to multiplayer social deduction.
+3. **Sabotage** — impostor has kill only; needs Lights / O2 / Reactor / Comms / Doors and the sabotage-win timer
+4. **Venting** — vent TMX objects placed; needs enter/exit interaction + network node graph
+5. **Admin map** — show coloured player-room dots on the admin table
+6. **Security cameras** — let players watch the camera feeds from the Security room
+
+---
+
+## 9. Original-vs-Clone Gap Analysis (as of Session 12)
+
+### ✅ Implemented correctly
+| Feature | Notes |
+|---|---|
+| Movement (WASD + joystick) | Matches |
+| 8 task mini-games + task list/bar/compass | Matches (compass shows all tasks; original shows one at a time) |
+| Report dead body / Emergency meeting button | Matches |
+| Meeting: discuss→vote→result phases (30 s + 60 s) | Matches |
+| Vote tallying, skip, ejection | Matches |
+| Kill with cooldown (15 s) | Matches |
+| Win conditions (task complete / impostor majority / eject all impostors) | Matches |
+| Ghost walks through walls | Matches |
+| Ghost can complete tasks (contributions count) | Matches — fixed Session 12 |
+| Fog of war (crew 200 wu, impostor 280 wu; ghosts see full map) | Matches — added Session 12 |
+| Ambient room sounds, minimap, kill banner | Matches |
+| Multiplayer up to 15 players (Colyseus) | Matches |
+
+### ❌ Missing — high gameplay impact
+| Gap | What original does |
+|---|---|
+| **In-meeting chat** | Text chat + Quick Chat during discussion phase — how players accuse/defend |
+| **Sabotage** | Lights (vision → near-zero), O2/Reactor (timed critical → crew must fix or lose), Comms (hides task list), Doors (locks rooms) |
+| **Sabotage win condition** | Impostor wins if O2 or Reactor timer expires |
+| **Venting** | Impostor-only: enter vent network, travel between nodes, emerge elsewhere |
+
+### ⚠️ Missing — medium impact
+| Gap | What original does |
+|---|---|
+| **Admin map** | Interactive table shows coloured player-room dots in real time |
+| **Security cameras** | Watch static camera feeds from Security room |
+| **Multi-step tasks** | Fix Wiring (3 locations), Fuel Engines (2 stages), Divert Power (Electrical → target room) |
+| **Fake tasks** | Impostor stands at consoles faking animation |
+| **Per-ejection role reveal** | Shows ejected player's role + remaining impostors count |
+
+### 🟡 Missing — minor/cosmetic
+| Gap | Notes |
+|---|---|
+| Hats/skins/pets/visors | Clone: colour + name only |
+| Ghost chat | Ghosts can send ghost-only messages in original |
+| Visual tasks | Medbay Scan etc. play a public animation proving innocence |
+| Number-of-impostors setting | Original: 1–3; clone: always 1 |
+| Kill cooldown visual counter | Number countdown on kill button |

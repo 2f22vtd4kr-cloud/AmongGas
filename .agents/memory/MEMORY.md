@@ -8,3 +8,4 @@
 - [Colyseus 0.17 on Replit setup](colyseus-0.17-replit-setup.md) — server `colyseus` package must live in `server/` only; never in root (breaks rollup). Browser uses `@colyseus/sdk`. `waitForPort:5001` unsupported by workflow system. `server/` needs `legacy-peer-deps=true` (.npmrc) or npm install 403s on a blocked peer dep.
 - [Colyseus room: players map key vs p.id](colyseus-players-map-key.md) — `players` MapSchema keyed by sessionId; `p.id` is the userId (dev_XXX in dev mode) — never compare p.id to impostorSid.
 - [Colyseus Node.js SDK movement testing](colyseus-node-movement-testing.md) — single-hop MOVE with auto-calculated wait beats step-by-step walking for integration tests; schema patches arrive in a separate frame from broadcast messages.
+- [Fog of war implementation](fog-of-war.md) — two-layer GeometryMask invertAlpha=true approach; Canvas-compatible; `{ add: false }` removed from Phaser 3.90 typings — use `add.graphics().setVisible(false)` instead.

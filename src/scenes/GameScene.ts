@@ -8,6 +8,7 @@ import {
   BOT_POS, ALL_COLORS, PLAYER_SPAWN, WORLD_WIDTH, WORLD_HEIGHT,
   INTERACT_RADIUS, KILL_RADIUS, REPORT_RADIUS, NO_OF_MISSIONS,
   AMBIENT_CENTRES, TASK_TITLES, CAMERA_ZOOM,
+  CREW_VISION, IMP_VISION,
 } from '../settings';
 import type { TaskDef, BotData } from '../types';
 import { parseTmx } from '../utils/TmxParser';
@@ -135,6 +136,12 @@ export class GameScene extends Phaser.Scene {
     container: Phaser.GameObjects.Container;
     icon: Phaser.GameObjects.Triangle;
   }[] = [];
+
+  // --- fog of war ---
+  private fogInner!: Phaser.GameObjects.Rectangle;   // main darkness layer
+  private fogOuter!: Phaser.GameObjects.Rectangle;   // soft-edge transition layer
+  private fogMaskInner!: Phaser.GameObjects.Graphics;
+  private fogMaskOuter!: Phaser.GameObjects.Graphics;
 
   // --- UI overlay ---
   // A second, unzoomed camera dedicated to HUD/UI. Camera zoom/rotation on
@@ -293,6 +300,9 @@ export class GameScene extends Phaser.Scene {
 
     // ── UI camera: renders the HUD without the main camera's zoom/scroll ──
     this.setupUiCamera();
+
+    // ── Fog of war ──
+    this.setupFog();
 
     // ── Round start sound ──
     this.time.delayedCall(800, () => {
@@ -663,6 +673,82 @@ export class GameScene extends Phaser.Scene {
     this.uiCamera.ignore(this.children.list.filter((o) => !hudSet.has(o)));
   }
 
+  // ────────────────── Fog of war ──────────────────
+
+  /**
+   * Creates two stacked dark overlays (fixed to the viewport) masked by
+   * a circle at the player's position — inner layer is near-opaque (the main
+   * darkness), outer layer is semi-transparent (the soft falloff zone).
+   * Both use GeometryMask with invertAlpha=true so they render everywhere
+   * OUTSIDE their respective circles. Works in Canvas and WebGL.
+   *
+   * Visual result:
+   *   0 … CREW_VISION px   → fully lit
+   *   CREW_VISION … ×1.4   → 40 % dark  (transition fade)
+   *   beyond ×1.4           → ~96 % dark (near-black)
+   *
+   * Impostors get IMP_VISION instead of CREW_VISION.
+   * Ghosts see the full map with no overlay.
+   */
+  private setupFog() {
+    const { width: W, height: H } = this.scale;
+
+    // Outer (transition) layer — lower alpha, larger hole
+    this.fogOuter = this.add.rectangle(W / 2, H / 2, W, H, 0x000000, 0.4)
+      .setScrollFactor(0).setDepth(48);
+    // Graphics used only as mask paths — setVisible(false) hides them visually
+    // while GeometryMask still reads their path data (Canvas + WebGL compatible).
+    this.fogMaskOuter = this.add.graphics().setVisible(false);
+    const outerMask = this.fogMaskOuter.createGeometryMask();
+    outerMask.invertAlpha = true;
+    this.fogOuter.setMask(outerMask);
+
+    // Inner (darkness) layer — high alpha, standard hole
+    this.fogInner = this.add.rectangle(W / 2, H / 2, W, H, 0x000000, 0.92)
+      .setScrollFactor(0).setDepth(49);
+    this.fogMaskInner = this.add.graphics().setVisible(false);
+    const innerMask = this.fogMaskInner.createGeometryMask();
+    innerMask.invertAlpha = true;
+    this.fogInner.setMask(innerMask);
+
+    // Fog layers and their mask graphics must not appear on the HUD camera
+    this.uiCamera.ignore([this.fogInner, this.fogOuter, this.fogMaskInner, this.fogMaskOuter]);
+  }
+
+  /**
+   * Called every frame from update(). Repositions the mask circles to follow
+   * the player in screen space. Hidden entirely when the player is a ghost.
+   */
+  private updateFog() {
+    // Ghosts see the full map — hide the fog
+    if (!this.player.isAlive) {
+      if (this.fogInner.visible) {
+        this.fogInner.setVisible(false);
+        this.fogOuter.setVisible(false);
+      }
+      return;
+    }
+    if (!this.fogInner.visible) {
+      this.fogInner.setVisible(true);
+      this.fogOuter.setVisible(true);
+    }
+
+    const cam = this.cameras.main;
+    // World → screen: subtract camera top-left, scale by zoom
+    const sx = (this.player.x - cam.worldView.x) * cam.zoom;
+    const sy = (this.player.y - cam.worldView.y) * cam.zoom;
+
+    const baseR = (this.player.isImpostor ? IMP_VISION : CREW_VISION) * cam.zoom;
+
+    this.fogMaskInner.clear();
+    this.fogMaskInner.fillStyle(0xffffff);
+    this.fogMaskInner.fillCircle(sx, sy, baseR);
+
+    this.fogMaskOuter.clear();
+    this.fogMaskOuter.fillStyle(0xffffff);
+    this.fogMaskOuter.fillCircle(sx, sy, baseR * 1.4);
+  }
+
   /**
    * A large circular touch button used for the action stack, styled after
    * the original game's translucent grey action buttons: dark glass circle,
@@ -819,6 +905,9 @@ export class GameScene extends Phaser.Scene {
 
     // Player
     this.player.update(this.cursors, this.wasd, delta, this.joystickForce);
+
+    // Fog of war
+    this.updateFog();
 
     if (this.isMultiplayer) {
       // Multiplayer (Phase 2: Position Sync) — no local bots or win-checking;
