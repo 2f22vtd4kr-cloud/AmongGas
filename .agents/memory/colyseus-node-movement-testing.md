@@ -37,5 +37,14 @@ After `KILL_CONFIRMED` or `MEETING_STARTED` arrives, wait **~400 ms** before rea
 `state.players.get(sid).isAlive` or `state.phase` — the schema patch arrives in a later frame.
 
 ## How to Apply
-- Use `sim/mp-test.mjs` as the reference test script (67 checks, ~98 s total).
+- Use `sim/mp-test.mjs` as the reference test script (grows over time as features are added; ~83 checks / ~109 s as of the in-meeting-chat feature).
 - `run: node sim/mp-test.mjs` against the running Colyseus server (port 5001).
+
+## Tracker queue drain gotcha
+The per-type message tracker (`makeTracker`) queues *every* broadcast of a type, even ones nobody
+is waiting for yet. If step N's broadcast of type X is never consumed (no `waitFor(X)` was pending
+when it arrived), it sits in the queue — and step N+1's `waitFor(X)` will immediately resolve with
+that **stale** message instead of waiting for the new one, silently corrupting the assertion (e.g.
+a truncation-length check reporting the length of an old, unrelated message). Always register
+`waitFor(type)` for every client *before* sending the message that should trigger it, for every
+single step — never assume the queue is empty going into the next assertion.

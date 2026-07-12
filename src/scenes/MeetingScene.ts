@@ -34,6 +34,16 @@ interface Voter {
   isPlayer: boolean;
 }
 
+interface ChatMessage {
+  senderId: string;
+  name: string;
+  color: string;
+  text: string;
+}
+
+const CHAT_MAX_LOG      = 8;   // messages kept visible in the panel
+const CHAT_INPUT_MAXLEN = 200;
+
 // ── Scene ─────────────────────────────────────────────────────────────────────
 
 export class MeetingScene extends Phaser.Scene {
@@ -53,6 +63,18 @@ export class MeetingScene extends Phaser.Scene {
   private voteButtons: Phaser.GameObjects.Container[] = [];
   private playerAlive = true;
 
+  // ── Chat (multiplayer only) ────────────────────────────────────────────────
+  private chatMessages: ChatMessage[] = [];
+  private chatUnread = 0;
+  private chatOpen = false;
+  private chatInputEl?: HTMLInputElement;
+  private chatToggleBtn?: Phaser.GameObjects.Text;
+  private chatBadge?: Phaser.GameObjects.Text;
+  private chatPanel?: Phaser.GameObjects.Container;
+  private chatLogText?: Phaser.GameObjects.Text;
+  private chatInputPreview?: Phaser.GameObjects.Text;
+  private chatUnsub?: () => void;
+
   constructor() {
     super({ key: 'MeetingScene' });
   }
@@ -64,6 +86,9 @@ export class MeetingScene extends Phaser.Scene {
     this.votedFor = null;
     this.elapsed = 0;
     this.phase = 'discuss';
+    this.chatMessages = [];
+    this.chatUnread = 0;
+    this.chatOpen = false;
 
     if (data.mode === 'multiplayer') {
       this.isMultiplayer = true;
@@ -129,7 +154,7 @@ export class MeetingScene extends Phaser.Scene {
 
     // In multiplayer, wait for the server's VOTE_RESULT instead of tallying locally
     if (this.isMultiplayer) {
-      NetworkManager.room?.onMessage('VOTE_RESULT', (msg: {
+      const offVoteResult = NetworkManager.room?.onMessage('VOTE_RESULT', (msg: {
         ejectedId: string | null;
         votes: Record<string, string | 'skip'>;
       }) => {
@@ -137,6 +162,12 @@ export class MeetingScene extends Phaser.Scene {
         this.phase = 'result';
         this.showResultAndClose(msg.ejectedId);
       });
+      const offChat = NetworkManager.room?.onMessage('CHAT_MESSAGE', (msg: ChatMessage) => {
+        this.onChatMessage(msg);
+      });
+      this.chatUnsub = () => { offVoteResult?.(); offChat?.(); };
+
+      this.buildChatUi();
     }
   }
 
@@ -256,6 +287,126 @@ export class MeetingScene extends Phaser.Scene {
     }).setOrigin(0.5, 0);
   }
 
+  // ── Chat (multiplayer only) ─────────────────────────────────────────────────
+
+  /** Builds the toggle button, unread badge, and (initially hidden) chat panel. */
+  private buildChatUi() {
+    const { width: W, height: H } = this.scale;
+
+    this.chatToggleBtn = this.add.text(20, 28, '💬 Chat', {
+      fontSize: '20px', color: '#ffffff', backgroundColor: '#333',
+      padding: { x: 10, y: 6 }, fontFamily: 'Arial',
+    }).setOrigin(0, 0).setInteractive({ useHandCursor: true }).setDepth(30);
+    this.chatToggleBtn.on('pointerup', () => this.chatOpen ? this.closeChatPanel() : this.openChatPanel());
+
+    this.chatBadge = this.add.text(20 + this.chatToggleBtn.width - 8, 22, '', {
+      fontSize: '14px', color: '#ffffff', backgroundColor: '#ff2222',
+      padding: { x: 5, y: 1 }, fontFamily: 'Arial', fontStyle: 'bold',
+    }).setOrigin(0.5, 0).setDepth(31).setVisible(false);
+
+    const panelW = W * 0.88;
+    const panelH = H * 0.6;
+    this.chatPanel = this.add.container(W / 2, H / 2).setDepth(40).setVisible(false);
+
+    const bg = this.add.rectangle(0, 0, panelW, panelH, 0x0a0a0a, 0.97).setStrokeStyle(2, 0x555555);
+    const title = this.add.text(-panelW / 2 + 16, -panelH / 2 + 12, '💬 Meeting Chat', {
+      fontSize: '20px', color: '#ffdd57', fontFamily: 'Arial', fontStyle: 'bold',
+    }).setOrigin(0, 0);
+    const closeBtn = this.add.text(panelW / 2 - 16, -panelH / 2 + 12, '✕', {
+      fontSize: '22px', color: '#ffffff', fontFamily: 'Arial',
+    }).setOrigin(1, 0).setInteractive({ useHandCursor: true });
+    closeBtn.on('pointerup', () => this.closeChatPanel());
+
+    this.chatLogText = this.add.text(-panelW / 2 + 16, -panelH / 2 + 52, '', {
+      fontSize: '16px', color: '#ffffff', fontFamily: 'Arial',
+      wordWrap: { width: panelW - 32 }, lineSpacing: 6,
+    }).setOrigin(0, 0);
+
+    this.chatPanel.add([bg, title, closeBtn, this.chatLogText]);
+
+    if (this.playerAlive) {
+      const inputBoxW = panelW - 128;
+      const inputY = panelH / 2 - 60;
+      const inputBg = this.add.rectangle(-panelW / 2 + 16, inputY, inputBoxW, 44, 0x222222)
+        .setOrigin(0, 0).setStrokeStyle(1, 0x555555).setInteractive({ useHandCursor: true });
+      this.chatInputPreview = this.add.text(-panelW / 2 + 26, inputY + 11, 'Type a message…', {
+        fontSize: '16px', color: '#888888', fontFamily: 'Arial',
+      }).setOrigin(0, 0);
+      const sendBtn = this.add.text(panelW / 2 - 16, inputY, 'Send', {
+        fontSize: '18px', color: '#ffffff', backgroundColor: '#1a6b3a',
+        padding: { x: 14, y: 12 }, fontFamily: 'Arial', fontStyle: 'bold',
+      }).setOrigin(1, 0).setInteractive({ useHandCursor: true });
+
+      inputBg.on('pointerup', () => this.chatInputEl?.focus());
+      sendBtn.on('pointerup', () => this.sendChat());
+
+      this.chatPanel.add([inputBg, this.chatInputPreview, sendBtn]);
+
+      // Hidden HTML input for mobile/desktop keyboard — mirrors LobbyScene/MenuScene pattern.
+      this.chatInputEl = document.createElement('input');
+      this.chatInputEl.type = 'text';
+      this.chatInputEl.maxLength = CHAT_INPUT_MAXLEN;
+      Object.assign(this.chatInputEl.style, { position: 'fixed', left: '-9999px', top: '0' });
+      document.body.appendChild(this.chatInputEl);
+      this.chatInputEl.addEventListener('input', () => {
+        const v = this.chatInputEl!.value;
+        this.chatInputPreview?.setText(v.length ? v : 'Type a message…')
+          .setColor(v.length ? '#ffffff' : '#888888');
+      });
+      this.chatInputEl.addEventListener('keydown', e => {
+        if (e.key === 'Enter') this.sendChat();
+      });
+    } else {
+      const ghostNote = this.add.text(0, panelH / 2 - 40, '☠ Ghosts can only spectate the chat', {
+        fontSize: '15px', color: '#666666', fontFamily: 'Arial',
+      }).setOrigin(0.5, 0);
+      this.chatPanel.add(ghostNote);
+    }
+  }
+
+  private openChatPanel() {
+    this.chatOpen = true;
+    this.chatPanel?.setVisible(true);
+    this.chatUnread = 0;
+    this.chatBadge?.setVisible(false);
+    this.refreshChatLog();
+  }
+
+  private closeChatPanel() {
+    this.chatOpen = false;
+    this.chatPanel?.setVisible(false);
+    this.chatInputEl?.blur();
+  }
+
+  private sendChat() {
+    const text = this.chatInputEl?.value.trim() ?? '';
+    if (!text) return;
+    NetworkManager.room?.send('CHAT_SEND', { text });
+    this.chatInputEl!.value = '';
+    this.chatInputPreview?.setText('Type a message…').setColor('#888888');
+  }
+
+  private onChatMessage(msg: ChatMessage) {
+    this.chatMessages.push(msg);
+    if (this.chatMessages.length > 50) this.chatMessages.shift();
+
+    if (this.chatOpen) {
+      this.refreshChatLog();
+    } else {
+      this.chatUnread++;
+      this.chatBadge?.setText(String(this.chatUnread)).setVisible(true);
+    }
+  }
+
+  private refreshChatLog() {
+    const recent = this.chatMessages.slice(-CHAT_MAX_LOG);
+    const lines = recent.map(m => {
+      const who = m.senderId === this.playerSessionId ? 'You' : m.name;
+      return `${who}: ${m.text}`;
+    });
+    this.chatLogText?.setText(lines.length ? lines.join('\n') : 'No messages yet — say hi!');
+  }
+
   // ── Freeplay tally (server handles this in multiplayer) ────────────────────
 
   private tallyVotes() {
@@ -314,5 +465,12 @@ export class MeetingScene extends Phaser.Scene {
       }
       this.scene.stop('MeetingScene');
     });
+  }
+
+  shutdown() {
+    this.chatUnsub?.();
+    this.chatUnsub = undefined;
+    this.chatInputEl?.remove();
+    this.chatInputEl = undefined;
   }
 }

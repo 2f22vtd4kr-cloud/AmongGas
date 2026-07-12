@@ -11,6 +11,8 @@ const TICK_MS           = 100;        // 10 Hz
 const RECONNECT_GRACE   = 30;         // seconds
 const KILL_COOLDOWN_MS  = 15_000;
 const VOTE_TIMEOUT_MS   = 60_000;
+const CHAT_MAX_LEN      = 200;
+const CHAT_RATE_MS      = 500; // min ms between messages from the same player
 
 // Task world positions (from TMX — keep in sync with TmxParser output)
 const TASK_POSITIONS: Record<string, { x: number; y: number }> = {
@@ -44,6 +46,7 @@ export class AmongGasRoom extends Room {
   private killCooldowns  = new Map<string, number>();
   private emergencyUses  = new Map<string, number>();
   private lastPositions  = new Map<string, { x: number; y: number; t: number }>();
+  private lastChatAt     = new Map<string, number>();
   // Track which sessionId is the impostor (not exposed in schema)
   private impostorSid    = '';
 
@@ -66,6 +69,7 @@ export class AmongGasRoom extends Room {
     this.onMessage('EMERGENCY',   (client)      => this.handleEmergency(client));
     this.onMessage('VOTE',        (client, msg) => this.handleVote(client, msg));
     this.onMessage('TASK_DONE',   (client, msg) => this.handleTaskDone(client, msg));
+    this.onMessage('CHAT_SEND',   (client, msg) => this.handleChat(client, msg));
 
     console.log(`[AmongGasRoom] ${this.roomId} created`);
   }
@@ -122,6 +126,7 @@ export class AmongGasRoom extends Room {
       this.killCooldowns.delete(client.sessionId);
       this.emergencyUses.delete(client.sessionId);
       this.lastPositions.delete(client.sessionId);
+      this.lastChatAt.delete(client.sessionId);
     }
     console.log(`[AmongGasRoom] ${p.name} left — ${this.clients.length} remaining`);
   }
@@ -154,6 +159,7 @@ export class AmongGasRoom extends Room {
     this.votes.clear();
     this.emergencyUses.forEach((_, k) => this.emergencyUses.set(k, 0));
     this.killCooldowns.forEach((_, k) => this.killCooldowns.set(k, 0));
+    this.lastChatAt.clear();
 
     this.state.phase = 'GAME';
 
@@ -304,6 +310,37 @@ export class AmongGasRoom extends Room {
     task.completed = true;
     this.state.tasksDone++;
     this.checkWinConditions();
+  }
+
+  /**
+   * In-meeting text chat. Only alive players may send, and only while a
+   * meeting (discussion/vote) is in progress — matches the original game's
+   * "discussion phase" chat. Ghosts are excluded from the main channel (a
+   * separate ghost-only chat is a known, still-missing gap). Messages are
+   * relayed only — never stored in the replicated schema, since chat history
+   * has no gameplay effect and would bloat every state patch.
+   */
+  private handleChat(client: Client, msg: { text?: string }) {
+    if (this.state.phase !== 'MEETING') return;
+
+    const sender = this.state.players.get(client.sessionId);
+    if (!sender?.isAlive) return;
+
+    const text = String(msg?.text ?? '').trim().slice(0, CHAT_MAX_LEN);
+    if (!text) return;
+
+    const now  = Date.now();
+    const last = this.lastChatAt.get(client.sessionId) ?? 0;
+    if (now - last < CHAT_RATE_MS) return client.send('ERROR', { code: 'CHAT_RATE_LIMIT' });
+    this.lastChatAt.set(client.sessionId, now);
+
+    this.broadcast('CHAT_MESSAGE', {
+      senderId: client.sessionId,
+      name: sender.name,
+      color: sender.color,
+      text,
+      ts: now,
+    });
   }
 
   // ─── Win conditions ────────────────────────────────────────────────────────

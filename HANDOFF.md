@@ -252,6 +252,16 @@ Phase 4 code is wired and TypeScript-clean. To activate it in production:
   - `shareRoom()`: hardcoded `'AmongGasBot'` replaced with `import.meta.env.VITE_BOT_USERNAME ?? 'AmongGasBot'`
 - TypeScript: clean (`tsc --noEmit` passes)
 
+### Session 13 (2026-07-12) — In-meeting chat
+
+**In-meeting text chat (added — server + `src/scenes/MeetingScene.ts`):**
+- Server-relayed only, never stored in the replicated `GameRoomState` schema — chat has no gameplay effect and would bloat every state patch.
+- `server/rooms/AmongGasRoom.ts`: new `CHAT_SEND` message handler → `handleChat()`. Validates `phase === 'MEETING'`, sender is alive (ghosts excluded from the main channel — ghost-only chat remains a separate, still-missing gap), trims/truncates to 200 chars, per-sender 500 ms rate limit (`ERROR` code `CHAT_RATE_LIMIT` on violation). Broadcasts `CHAT_MESSAGE` `{ senderId, name, color, text, ts }` to all clients, including the sender.
+- Client: `MeetingScene.ts` — multiplayer-only (freeplay has no one to chat with). Toggle button + unread badge, modal panel (message log + HTML `<input>` mirrored to a Phaser text preview, following the existing `MenuScene`/`LobbyScene` DOM-input pattern) with a Send button. Dead players see the panel (spectate) but the input row is hidden. Listener unsubscribe + DOM input cleanup wired into `shutdown()` — `MeetingScene` is fully re-created each meeting, so listeners must be torn down or they'd stack across meetings.
+- Test coverage: `sim/mp-test.mjs` Test F (drop-outside-meeting, broadcast shape, rate limit, truncation, drop-for-dead-players) — 83/83 checks pass across the full suite (~109 s).
+
+**Next priority (see §9):** Sabotage (Lights / O2 / Reactor / Comms / Doors + win timer).
+
 ### Session 12 (2026-07-12) — Ghost task fix + Fog of war + Gap analysis
 
 **Ghost task completion (fixed):**
@@ -299,7 +309,7 @@ Tests run against the live Colyseus server with real `@colyseus/sdk` WebSocket c
 ### Next Session Priorities
 See §9 for the full original-vs-clone gap analysis. Implement in this order:
 1. **Fog of war** — ✅ DONE (Session 12)
-2. **In-meeting chat** — no text/quick-chat at all; discussion phase is silent. Core to multiplayer social deduction.
+2. **In-meeting chat** — ✅ DONE (Session 13)
 3. **Sabotage** — impostor has kill only; needs Lights / O2 / Reactor / Comms / Doors and the sabotage-win timer
 4. **Venting** — vent TMX objects placed; needs enter/exit interaction + network node graph
 5. **Admin map** — show coloured player-room dots on the admin table
@@ -324,11 +334,11 @@ See §9 for the full original-vs-clone gap analysis. Implement in this order:
 | Fog of war (crew 200 wu, impostor 280 wu; ghosts see full map) | Matches — added Session 12 |
 | Ambient room sounds, minimap, kill banner | Matches |
 | Multiplayer up to 15 players (Colyseus) | Matches |
+| In-meeting text chat (multiplayer, alive players only) | Matches (no Quick Chat presets, no separate ghost channel) — added Session 13 |
 
 ### ❌ Missing — high gameplay impact
 | Gap | What original does |
 |---|---|
-| **In-meeting chat** | Text chat + Quick Chat during discussion phase — how players accuse/defend |
 | **Sabotage** | Lights (vision → near-zero), O2/Reactor (timed critical → crew must fix or lose), Comms (hides task list), Doors (locks rooms) |
 | **Sabotage win condition** | Impostor wins if O2 or Reactor timer expires |
 | **Venting** | Impostor-only: enter vent network, travel between nodes, emerge elsewhere |

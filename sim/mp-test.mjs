@@ -43,7 +43,7 @@ function makeTracker(room) {
   const TYPES   = [
     'YOU_ARE_IMPOSTOR', 'YOU_ARE_CREW',
     'KILL_CONFIRMED', 'MEETING_STARTED', 'VOTE_RESULT',
-    'GAME_OVER', 'POSITION_CORRECTION', 'ERROR',
+    'GAME_OVER', 'POSITION_CORRECTION', 'ERROR', 'CHAT_MESSAGE',
   ];
   for (const t of TYPES) {
     queues[t]  = [];
@@ -409,6 +409,108 @@ async function testMeeting(n) {
   await wait(600);
 }
 
+// ─── Test F: In-meeting chat ──────────────────────────────────────────────────
+async function testChat(n) {
+  console.log(`\n── Test F: In-meeting chat  (${n} players) ─────────────────`);
+  const clients = await startGame(n);
+  const crew    = clients.filter(c => c.isImpostor === false);
+  const imp     = clients.find(c => c.isImpostor === true);
+  if (!crew.length || !imp) {
+    console.log('  ⚠️  Missing roles — skipping');
+    clients.forEach(c => c.leave()); return;
+  }
+
+  // Chat sent before any meeting must be ignored (no CHAT_MESSAGE to anyone)
+  const preP = clients.map(c => c.waitFor('CHAT_MESSAGE', 1500));
+  crew[0].send('CHAT_SEND', { text: 'too early' });
+  const preResults = await Promise.allSettled(preP);
+  check('Chat outside a meeting is dropped',
+    preResults.every(r => r.status === 'rejected'),
+    `${preResults.filter(r => r.status === 'fulfilled').length} clients received it`);
+
+  const meetPs = clients.map(c => c.waitFor('MEETING_STARTED', 6000));
+  crew[0].send('EMERGENCY', {});
+  await tryCheck('All clients receive MEETING_STARTED', () => Promise.all(meetPs));
+  await wait(300);
+
+  // Normal message reaches every client, from crew and from the impostor
+  for (const [sender, text] of [[crew[0], 'it wasn' + "'" + 't me'], [imp, 'sus on P2']]) {
+    const chatPs = clients.map(c => c.waitFor('CHAT_MESSAGE', 3000));
+    sender.send('CHAT_SEND', { text });
+    const results = await Promise.allSettled(chatPs);
+    const allGot  = results.every(r => r.status === 'fulfilled');
+    check(`All ${n} clients receive chat from ${sender.name}`, allGot,
+      allGot ? '' : `${results.filter(r => r.status === 'rejected').length} timed out`);
+    if (allGot) {
+      const m = results[0].value;
+      check('Message text matches',    m.text === text,             `got '${m.text}'`);
+      check('senderId matches sender', m.senderId === sender.sessionId);
+      check('sender name included',    m.name === sender.name,      m.name);
+    }
+    await wait(600); // clear the server's per-sender rate-limit window
+  }
+
+  // Rate limiting: two rapid messages from the same sender — second is rejected
+  const errP  = crew[0].waitFor('ERROR', 2000);
+  const echoP = clients.map(c => c.waitFor('CHAT_MESSAGE', 2000));
+  crew[0].send('CHAT_SEND', { text: 'first' });
+  crew[0].send('CHAT_SEND', { text: 'second-too-fast' });
+  await tryCheck('Rapid second message rejected with CHAT_RATE_LIMIT', async () => {
+    const err = await errP;
+    if (err?.code !== 'CHAT_RATE_LIMIT') throw new Error(`got code '${err?.code}'`);
+  });
+  await Promise.allSettled(echoP);
+  await wait(600);
+
+  // Oversized text is truncated server-side, not rejected
+  const longText = 'x'.repeat(400);
+  const longPs = clients.map(c => c.waitFor('CHAT_MESSAGE', 3000));
+  crew[0].send('CHAT_SEND', { text: longText });
+  const longResults = await Promise.allSettled(longPs);
+  const longMsg = longResults[0].status === 'fulfilled' ? longResults[0].value : null;
+  check('Oversized message truncated to 200 chars',
+    longMsg?.text?.length === 200, `got length ${longMsg?.text?.length}`);
+
+  // End the meeting so the game can finish cleanly
+  const votePs = clients.map(c => c.waitFor('VOTE_RESULT', 12_000));
+  for (const c of clients) c.send('VOTE', { targetId: 'skip' });
+  await tryCheck('All clients receive VOTE_RESULT', () => Promise.all(votePs));
+  await wait(400);
+
+  // Dead players cannot chat — kill one crew member, then have them try to send
+  if (crew.length > 1) {
+    const victim = crew[1] ?? crew[0];
+    const rally  = { x: 2200, y: 1600 };
+    await victim.moveTo(rally.x, rally.y);
+    await wait(300);
+    await imp.moveTo(rally.x, rally.y);
+    await wait(300);
+    const killPs = clients.map(c => c.waitFor('KILL_CONFIRMED', 5000));
+    imp.send('KILL', { targetId: victim.sessionId });
+    await Promise.allSettled(killPs);
+    await wait(400);
+
+    const meetPs2 = clients.map(c => c.waitFor('MEETING_STARTED', 6000));
+    crew[0].send('REPORT', { corpseId: victim.sessionId });
+    await tryCheck('Report triggers a new meeting', () => Promise.all(meetPs2));
+    await wait(300);
+
+    const ghostChatPs = clients.map(c => c.waitFor('CHAT_MESSAGE', 1500));
+    victim.send('CHAT_SEND', { text: 'ghost speaking' });
+    const ghostResults = await Promise.allSettled(ghostChatPs);
+    check('Dead player chat is dropped',
+      ghostResults.every(r => r.status === 'rejected'),
+      `${ghostResults.filter(r => r.status === 'fulfilled').length} clients received it`);
+
+    const votePs2 = clients.map(c => c.waitFor('VOTE_RESULT', 12_000));
+    for (const c of clients) if (c !== victim) c.send('VOTE', { targetId: 'skip' });
+    await tryCheck('Meeting resolves after ghost-chat check', () => Promise.all(votePs2));
+  }
+
+  clients.forEach(c => c.leave());
+  await wait(600);
+}
+
 // ─── Test E: Speed-cheat detection ───────────────────────────────────────────
 async function testSpeedCheat() {
   console.log('\n── Test E: Speed-cheat detection ────────────────────────────');
@@ -438,6 +540,7 @@ await testLobbyLeave();
 for (const n of [4, 8, 15]) await testCrewWin(n);
 await testImpostorWin(4);    // 2 kills × ~16 s each
 await testMeeting(6);
+await testChat(6);
 await testSpeedCheat();
 
 const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
