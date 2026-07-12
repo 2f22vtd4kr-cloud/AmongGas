@@ -1,36 +1,10 @@
 ---
-name: Colyseus 0.17 on Replit — setup constraints
-description: Colyseus 0.17 package split, Replit security policy blocks, and correct install commands for Among Gas server + browser client.
+name: Colyseus 0.17 on Replit setup
+description: Environment quirks for installing/running this project's Colyseus 0.17 server on Replit
 ---
 
-## The rule
-
-Server and browser client are **separate packages** in Colyseus 0.17. Never install the server package in the Vite/browser root.
-
-| Role | Package | Install location |
-|---|---|---|
-| Game server (Node.js) | `colyseus` + `@colyseus/schema@^4` | `server/` only |
-| Browser client (Vite) | `@colyseus/sdk` | root `package.json` |
-
-**Why:** `colyseus` (server) pulls in `@colyseus/uwebsockets-transport` which is blocked by Replit's security policy (403 Forbidden). Installing it in root also corrupts rollup's native binary (breaks Vite) via `--omit=optional` side effects.
-
-## Install commands
-
-```bash
-# Server
-cd server && npm install colyseus @colyseus/schema@^4.0.0 express cors --legacy-peer-deps
-
-# Browser client (root)
-npm install @colyseus/sdk
-```
-
-## API differences from 0.15/0.16
-
-- Room class: `extends Room { state = new GameRoomState(); }` — no generic, no `this.setState()`
-- `@filter()` decorator **removed** — use `client.send('YOU_ARE_IMPOSTOR', {})` for per-client secrets
-- `@colyseus/schema` **v4** required (not v3)
-- Browser: `import { Client, Room } from '@colyseus/sdk'`
-- `room.roomId` (not `room.id`)
-- Workflow system cannot `waitForPort: 5001` — only specific ports supported. Run Colyseus workflow without `waitForPort`.
-
-**How to apply:** Any future work adding multiplayer rooms, schema fields, or client networking must follow this split.
+- The server `colyseus` package must live only in `server/` (its own package.json), never hoisted into the root project — mixing it into the root breaks the Vite/rollup client build.
+- The browser/client side uses `@colyseus/sdk`, not the `colyseus` server package.
+- `colyseus@0.17` lists `@colyseus/uwebsockets-transport` as a (non-optional-in-metadata) peerDependency. npm 7+'s auto-install-peers tries to fetch it, and Replit's package firewall blocks that GitHub-hosted transport package with a 403, which aborts the whole `npm install` in `server/`.
+  **Fix:** install with `legacy-peer-deps=true` (an `.npmrc` in `server/` with that line makes it permanent) so npm doesn't try to auto-install that peer. The app only needs `@colyseus/ws-transport`, which installs fine as a direct dependency.
+- The Replit workflow system's `waitForPort` task option does not support port 5001 (the Colyseus server) — don't rely on it; the workflow still starts fine, just confirm via logs instead of waitForPort.
