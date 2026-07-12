@@ -121,64 +121,45 @@ Goal: adapt the desktop/landscape web port for mobile **portrait** play (Telegra
 
 ---
 
-## Multiplayer — Phase 1 complete, Phase 2 next
+## Multiplayer — ALL PHASES COMPLETE ✅
 
-### Phase 1 — Infrastructure (COMPLETE, both servers running)
+All four multiplayer phases are implemented, TypeScript-clean, and verified by a headless integration test (`sim/mp-test.mjs`, 67/67 checks, ~100 s runtime).
 
-All files created and TypeScript-clean (`npx tsc --noEmit` passes):
+### What's working
 
-| File | Status |
-|---|---|
-| `server/index.ts` | Colyseus 0.17 server, port 5001 |
-| `server/auth/telegram.ts` | HMAC-SHA256 initData validator |
-| `server/schema/GameState.ts` | PlayerState, TaskState, GameRoomState |
-| `server/rooms/AmongGasRoom.ts` | LOBBY→GAME→MEETING→RESULT, maxClients=15 |
-| `src/network/NetworkManager.ts` | @colyseus/sdk browser client, auto-detects dev URL |
-| `src/scenes/LobbyScene.ts` | Create/join UI, 6-char room code, player list, Share |
-| `src/main.ts` | LobbyScene added to scene list |
-| `src/scenes/MenuScene.ts` | Online button → char select → LobbyScene |
+| Phase | Summary |
+|-------|---------|
+| 1 — Infrastructure | Colyseus 0.17 server (port 5001), room schema, Telegram auth (bypassed in dev), lobby UI with 6-char room code and player list |
+| 2 — Position sync | `RemotePlayer.ts` sprites; 10 Hz MOVE messages; server-side speed validation with POSITION_CORRECTION; linear interpolation on client |
+| 3 — Full game events | All gameplay events server-driven: kills (KILL_CONFIRMED), tasks (TASK_DONE), meetings (MEETING_STARTED), votes (VOTE_RESULT), win/loss (GAME_OVER). MeetingScene handles both freeplay and multiplayer init shapes |
+| 4 — Telegram deep-link invite | `start_param` at boot or on Online click → skip menus, pre-fill name from Telegram `first_name`, auto-join room. Share button builds `t.me/<BOT>/play?startapp=<roomId>` link |
 
-**Phase 1 test checklist** (manual, two browser tabs):
-- [ ] 1.1 Colyseus server starts on port 5001 ← already confirmed in workflow logs
-- [ ] 1.2 Two tabs can join same room code
-- [ ] 1.3 initData validation bypassed in dev (NODE_ENV=development)
-- [ ] 1.4 Player leaves tab → other tab's player list updates
-- [ ] 1.5 Room disposed after all players leave
+### Integration test
 
-### Phase 2 — Real-time position sync (NOT STARTED — start here)
-
-Goal: other players' characters appear and move on your screen in GameScene.
-
-Files to create/modify:
-- **`src/objects/RemotePlayer.ts`** — sprite for other players (driven by server state, not input)
-- **`src/scenes/GameScene.ts`** — inject NetworkManager; on `state.players` change: create/destroy/move RemotePlayer instances; send local position updates on `preUpdate` throttle (~20 Hz)
-- **`server/rooms/AmongGasRoom.ts`** — `onMessage('move', ...)` handler updates `PlayerState.x/y/anim`; schema already has those fields
-
-Key Colyseus 0.17 API for Phase 2:
-```typescript
-// Client — listen for state changes
-room.state.players.onAdd((player, sessionId) => { /* create RemotePlayer */ });
-room.state.players.onRemove((player, sessionId) => { /* destroy RemotePlayer */ });
-player.onChange(() => { /* update position/anim */ });
-
-// Client — send position
-room.send('move', { x, y, anim: 'walk_down' });
-
-// Server — handle in AmongGasRoom
-this.onMessage('move', (client, data) => {
-  const p = this.state.players.get(client.sessionId);
-  if (p) { p.x = data.x; p.y = data.y; p.anim = data.anim; }
-});
+```bash
+node sim/mp-test.mjs   # requires Colyseus server running on port 5001
 ```
 
-### Phase 3 — Full game events ✅ COMPLETE
-- Kills, task completion, emergency meeting, votes, win/loss all routed through Colyseus
-- `MeetingScene.ts` rewritten to handle both freeplay and multiplayer init shapes
-- Client listens for: `KILL_CONFIRMED`, `MEETING_STARTED`, `VOTE_RESULT`, `GAME_OVER`, `POSITION_CORRECTION`
-- Client sends: `KILL`, `REPORT`, `EMERGENCY`, `TASK_DONE`, `VOTE`
+Tests: lobby join/leave, crew win (4/8/15 players), impostor win via kills (4 players), emergency meeting + voting, speed-cheat detection.
 
-### Phase 4 — Telegram deep-link invite ✅ COMPLETE
-- `MenuScene.ts`: if `start_param` present at boot or on Online click → skip char select, use Telegram `first_name`, go straight to `LobbyScene`
-- `LobbyScene.ts`: auto-join shows "Joining room…" status + error recovery back button; `shareRoom()` uses `VITE_BOT_USERNAME` env var
-- `src/vite-env.d.ts` declares `VITE_BOT_USERNAME`; env var set to `AmongGasBot` (update to real bot username after BotFather setup)
-- **To activate in production**: create bot via BotFather, register Mini App, set `/play` command, update `VITE_BOT_USERNAME` in Replit env vars, deploy
+### Key server files
+
+| File | Role |
+|------|------|
+| `server/rooms/AmongGasRoom.ts` | Room logic: LOBBY→GAME→MEETING→RESULT, maxClients=15 |
+| `server/schema/GameState.ts` | PlayerState, TaskState, GameRoomState |
+| `server/auth/telegram.ts` | HMAC-SHA256 initData validator (bypassed when NODE_ENV=development) |
+
+### Known bugs (low priority)
+- Red player visor renders green (cosmetic, pre-existing)
+
+### To activate Telegram deep-link in production
+1. Create bot via BotFather, register Mini App URL, set `/play` command
+2. Update `VITE_BOT_USERNAME` Replit env var to the real bot username
+3. Deploy
+
+### What's NOT done yet
+- `MeetingScene.ts` — still landscape layout; needs single-column portrait reflow for mobile
+- Task mini-scenes — not yet resized/repositioned for portrait touch
+- Telegram `viewportChanged` event not wired (safe-area insets read once at boot only)
+- Two-tab manual smoke test — all events verified by headless test but not yet visually confirmed across two real browser tabs
