@@ -3,6 +3,23 @@ import { fitContain, fitCover } from '../utils/imageFit';
 
 type MenuSection = 'main' | 'charSelect' | 'nameInput' | 'help' | 'credits';
 
+// ─── Telegram helpers (safe outside Telegram context) ─────────────────────────
+type TgWebApp = {
+  initDataUnsafe?: {
+    start_param?: string;
+    user?: { first_name?: string; last_name?: string };
+  };
+};
+function tgWebApp(): TgWebApp | undefined {
+  return (window as unknown as { Telegram?: { WebApp?: TgWebApp } }).Telegram?.WebApp;
+}
+function getStartParam(): string {
+  return tgWebApp()?.initDataUnsafe?.start_param ?? '';
+}
+function getTelegramFirstName(): string {
+  return tgWebApp()?.initDataUnsafe?.user?.first_name ?? '';
+}
+
 const MAIN_OPTIONS = ['Freeplay', 'Online', 'Help', 'Credits', 'Quit'];
 // Y-positions as fractions of HEIGHT (matching Python i values)
 const MAIN_Y = [0.41 * 1, 0.53, 0.65, 0.77, 0.89].map((_, i) =>
@@ -37,6 +54,19 @@ export class MenuScene extends Phaser.Scene {
   }
 
   create() {
+    // ── Deep-link auto-join: Telegram opened this Mini App via t.me/Bot?startapp=CODE ──
+    // Skip all menus and jump straight to LobbyScene with defaults so the
+    // player lands in the invited room immediately.
+    const startParam = getStartParam();
+    if (startParam) {
+      const name = getTelegramFirstName().slice(0, 11) || 'Crewmate';
+      this.registry.set('playerName', name);
+      this.registry.set('playerColor', this.playerColor || 'Red');
+      this.registry.set('gameMode', 'online');
+      this.scene.start('LobbyScene');
+      return;
+    }
+
     const { width: W, height: H } = this.scale;
 
     // Background
@@ -119,9 +149,21 @@ export class MenuScene extends Phaser.Scene {
         this.registry.set('gameMode', 'Freeplay');
         this.showCharSelect();
         break;
-      case 1: // Online multiplayer — go through char select then lobby
+      case 1: // Online multiplayer
         this.registry.set('gameMode', 'online');
-        this.showCharSelect();
+        // If the Mini App was opened via a deep-link invite (start_param present),
+        // skip character select — go straight to LobbyScene which auto-joins the room.
+        if (getStartParam()) {
+          const name = getTelegramFirstName().slice(0, 11) ||
+                       (this.registry.get('playerName') as string) || 'Crewmate';
+          this.registry.set('playerName', name);
+          this.registry.set('playerColor', this.playerColor || 'Red');
+          this.music?.stop();
+          this.cleanupInput();
+          this.scene.start('LobbyScene');
+        } else {
+          this.showCharSelect();
+        }
         break;
       case 2: this.showHelp(); break;
       case 3: this.showCredits(); break;
@@ -170,11 +212,16 @@ export class MenuScene extends Phaser.Scene {
     this.cleanupInput();
     this.clearScene();
 
+    // Pre-fill from Telegram user data if available and no name chosen yet
+    if (!this.playerName) {
+      this.playerName = getTelegramFirstName().slice(0, 11);
+    }
+
     fitCover(this.add.image(W/2, H/2, 'menu_back2'), W, H);
     fitContain(this.add.image(W/2, H*0.25, 'menu_entername'), W*0.35, H*0.1);
     fitContain(this.add.image(W/2, H*0.45, 'menu_input'), W*0.35, H*0.1);
 
-    this.nameText = this.add.text(W/2, H*0.45, '', {
+    this.nameText = this.add.text(W/2, H*0.45, this.playerName, {
       fontSize: '28px',
       color: '#fff',
       fontFamily: 'Arial',
@@ -185,6 +232,7 @@ export class MenuScene extends Phaser.Scene {
     this.nameInputEl.type = 'text';
     this.nameInputEl.maxLength = 11;
     this.nameInputEl.placeholder = 'Enter name…';
+    this.nameInputEl.value = this.playerName;
     Object.assign(this.nameInputEl.style, {
       position: 'fixed', left: '-9999px', top: '0',
     });

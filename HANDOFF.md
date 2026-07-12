@@ -105,38 +105,28 @@ Browser loads index.html
 - ✅ Phase 1 — Infrastructure (server, room codes, Telegram auth bypass in dev)
 - ✅ Phase 2 — Position sync (`RemotePlayer` sprites, 10 Hz MOVE, interpolation)
 - ✅ Phase 3 — Full game events (kills, tasks, meetings, votes, win/loss — server-driven)
-- ❌ Phase 4 — Telegram deep-link invite — **START HERE next session**
+- ✅ Phase 4 — Telegram deep-link invite — **COMPLETE**
 
-### ▶ Next session START HERE — Phase 4: Telegram Deep-Link Invite
+### ▶ Next session START HERE — End-to-End Multiplayer Test
 
-**Goal:** Tapping a Telegram invite link auto-opens the Mini App and joins the right room.
+The entire multiplayer implementation is complete. The next priority is testing it:
 
-**How Telegram deep links work:**
-- BotFather sets a `/play` command that opens the Mini App with `?startapp=ROOM_CODE`
-- Inside the Mini App: `window.Telegram.WebApp.initDataUnsafe.start_param` holds `ROOM_CODE`
-- `LobbyScene.ts` reads `start_param` on boot → if present, auto-joins that room (skip the "Join" UI)
-- The Share button in `LobbyScene.ts` already builds a `t.me/BOT_NAME?startapp=ROOM_CODE` URL
+**Phase 3 end-to-end test (two browser tabs):**
+1. Open two tabs → both click Online → Create (tab 1) / Join with code (tab 2)
+2. Both see each other in the player list → host clicks Start Game
+3. Move around — verify both tabs see movement in real time
+4. Tab 1 (impostor) kills tab 2 → dead body appears on both sides
+5. Any player triggers Emergency Meeting → MeetingScene launches on both tabs
+6. Both vote → result shown → game continues or ends
+7. Win/loss → VictoryScene → back to MenuScene
 
-**Files to touch:**
-| File | Change |
-|------|--------|
-| `src/scenes/LobbyScene.ts` | On `create()`: read `start_param`; if set, call `autoJoin(code)` skipping the manual Join flow |
-| `src/scenes/LobbyScene.ts` | `autoJoin(code)` — same logic as pressing Join but with code pre-filled; show "Joining…" spinner |
-| `src/scenes/MenuScene.ts` | On Online button click: read `start_param`; if set, skip character-select and go directly to LobbyScene with `{autoJoin: code}` |
-| `server/index.ts` (optional) | Nothing required server-side — room code join already works |
-
-**Colyseus join in LobbyScene (existing pattern to reuse):**
-```typescript
-const room = await client.joinByRoomId(code); // or joinById depending on Colyseus version
-// Colyseus 0.17 uses: client.joinOrCreate / client.join with the 6-char room code as roomId
-```
-
-**Environment variable needed:**
-- `BOT_USERNAME` — set in Replit Secrets; used to build the `t.me/BOT_USERNAME?startapp=CODE` share URL (LobbyScene already has a placeholder)
-
-**Testing without a real bot:**
-- Manually append `#startapp=XXXXXX` or pass initData override via Telegram DevTools
-- Or: just test the auto-join code path by passing `{autoJoin: 'XXXXXX'}` from MenuScene directly
+**Known still-needed: BotFather setup (for real Telegram invites)**
+Phase 4 code is wired and TypeScript-clean. To activate it in production:
+1. Create a bot via BotFather → `/newbot`
+2. Register the Mini App → `/newapp` → set URL to your deployed Replit app
+3. Set the `/play` command → BotFather links it to the Mini App with `?startapp=ROOM_CODE`
+4. Update the `VITE_BOT_USERNAME` Replit env var to your actual bot username
+5. Deploy the Replit app (Reserved VM) so the `wss://` Colyseus URL is accessible from Telegram WebView
 
 ---
 
@@ -249,9 +239,21 @@ const room = await client.joinByRoomId(code); // or joinById depending on Colyse
 - ✅ Phase 3 — Full game events (kills, tasks, meetings, votes, win/loss — fully server-driven)
 - ❌ Phase 4 — Telegram deep-link invite (BotFather /play command → auto-join) — NOT STARTED
 
+### Session 10 (2026-07-12) — Phase 4: Telegram Deep-Link Invite
+- **`src/vite-env.d.ts`** created — declares `VITE_SERVER_URL` and `VITE_BOT_USERNAME` in `ImportMetaEnv`
+- **`VITE_BOT_USERNAME`** set as Replit env var (value: `AmongGasBot`; update to real bot username after BotFather setup)
+- **`MenuScene.ts`** — module-level helpers `getStartParam()` and `getTelegramFirstName()` added
+  - `create()`: if `start_param` present on boot, sets name from Telegram `first_name` (fallback `'Crewmate'`), color `'Red'`, jumps straight to `LobbyScene` — no menu shown
+  - `selectMainItem(1)` (Online click): if `start_param` present, also skips char select and goes directly to `LobbyScene`
+  - `showNameInput()`: pre-fills the name field from Telegram `first_name` when no name has been entered yet
+- **`LobbyScene.ts`** — `autoJoinStatusText` field added
+  - `create()`: when `start_param` branch fires, renders "Joining room…" + room code text so user sees feedback during connection
+  - `setEntryStatus()`: routes status updates to `autoJoinStatusText` when `errorText` is absent; on error (red), auto-creates a Back to Menu button so user is never stuck
+  - `shareRoom()`: hardcoded `'AmongGasBot'` replaced with `import.meta.env.VITE_BOT_USERNAME ?? 'AmongGasBot'`
+- TypeScript: clean (`tsc --noEmit` passes)
+
 ### Next Session Priorities
-1. **Test Phase 3 end-to-end** — open two browser tabs, join same room via LOCAL → Create/Join, play a full game: move, kill, report, meeting vote, win/loss all need to fire correctly across tabs.
-2. **Fix red player visor rendering green** (see §5 — cosmetic, low priority)
-3. **Phase 4: Telegram deep-link invite** — BotFather `/play` command → bot creates room → inline button with `startapp=ROOM_CODE` → client auto-joins via `initDataUnsafe.start_param`
-4. **Wire Telegram user identity** — pre-fill player name from `Telegram.WebApp.initDataUnsafe.user.first_name` in MenuScene character select
-5. Consider lazy-loading ambient sounds per room (31 MB currently omitted)
+1. **Test Phase 3 end-to-end** — open two browser tabs, join same room via Online → Create/Join, play a full game: move, kill, report, meeting vote, win/loss all need to fire correctly across tabs
+2. **BotFather setup** — create bot, register Mini App, set `/play` command, update `VITE_BOT_USERNAME` env var, then test Phase 4 inside real Telegram
+3. **Fix red player visor rendering green** (see §5 — cosmetic, low priority)
+4. Consider lazy-loading ambient sounds per room (31 MB currently omitted)

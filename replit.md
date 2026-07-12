@@ -177,7 +177,8 @@ this.onMessage('move', (client, data) => {
 - Client listens for: `KILL_CONFIRMED`, `MEETING_STARTED`, `VOTE_RESULT`, `GAME_OVER`, `POSITION_CORRECTION`
 - Client sends: `KILL`, `REPORT`, `EMERGENCY`, `TASK_DONE`, `VOTE`
 
-### Phase 4 — Telegram deep-link invite (NOT STARTED — implement next)
-- BotFather `/play` command → `?startapp=ROOM_CODE` → `LobbyScene` reads `initDataUnsafe.start_param` → auto-joins
-- `BOT_USERNAME` Replit Secret needed for Share URL
-- See `HANDOFF.md §7` for full implementation plan
+### Phase 4 — Telegram deep-link invite ✅ COMPLETE
+- `MenuScene.ts`: if `start_param` present at boot or on Online click → skip char select, use Telegram `first_name`, go straight to `LobbyScene`
+- `LobbyScene.ts`: auto-join shows "Joining room…" status + error recovery back button; `shareRoom()` uses `VITE_BOT_USERNAME` env var
+- `src/vite-env.d.ts` declares `VITE_BOT_USERNAME`; env var set to `AmongGasBot` (update to real bot username after BotFather setup)
+- **To activate in production**: create bot via BotFather, register Mini App, set `/play` command, update `VITE_BOT_USERNAME` in Replit env vars, deploy

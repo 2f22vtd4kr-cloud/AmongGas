@@ -14,6 +14,8 @@ export class LobbyScene extends Phaser.Scene {
   private startBtn!: Phaser.GameObjects.Text;
   private errorText?: Phaser.GameObjects.Text;
   private pollEvent?: Phaser.Time.TimerEvent;
+  /** Status text shown during deep-link auto-join (no entry UI present). */
+  private autoJoinStatusText?: Phaser.GameObjects.Text;
 
   constructor() {
     super({ key: 'LobbyScene' });
@@ -33,6 +35,14 @@ export class LobbyScene extends Phaser.Scene {
     if (NetworkManager.room) {
       this.showWaitingRoom();
     } else if (startParam) {
+      // Deep-link auto-join: show a status message while connecting
+      this.autoJoinStatusText = this.add.text(WIDTH / 2, HEIGHT / 2, `Joining room…`, {
+        fontSize: '28px', color: '#ffdd57',
+        fontFamily: 'Arial', align: 'center',
+      }).setOrigin(0.5);
+      this.add.text(WIDTH / 2, HEIGHT / 2 + 50, startParam, {
+        fontSize: '20px', color: '#888888', fontFamily: 'Arial, monospace',
+      }).setOrigin(0.5);
       this.joinByCode(startParam);
     } else {
       this.showEntry();
@@ -140,7 +150,24 @@ export class LobbyScene extends Phaser.Scene {
   }
 
   private setEntryStatus(msg: string, color = '#ffffff') {
-    this.errorText?.setText(msg).setColor(color);
+    if (this.errorText) {
+      this.errorText.setText(msg).setColor(color);
+    } else if (this.autoJoinStatusText) {
+      this.autoJoinStatusText.setText(msg).setColor(color);
+      // On error in auto-join mode (no entry UI), offer a back button so user isn't stuck
+      if (color === '#ff6666') {
+        this.time.delayedCall(100, () => {
+          const backBtn = this.add.text(WIDTH / 2, HEIGHT / 2 + 110, '← Back to Menu', {
+            fontSize: '22px', color: '#aaaaaa', fontFamily: 'Arial',
+            backgroundColor: '#111111', padding: { x: 18, y: 10 },
+          }).setOrigin(0.5).setInteractive({ useHandCursor: true });
+          backBtn.on('pointerup', () => {
+            NetworkManager.leave();
+            this.scene.start('MenuScene');
+          });
+        });
+      }
+    }
   }
 
   private clearEntryObjects() {
@@ -276,7 +303,8 @@ export class LobbyScene extends Phaser.Scene {
   }
 
   private shareRoom(roomCode: string) {
-    const url = `https://t.me/AmongGasBot/game?startapp=${roomCode}`;
+    const botName = import.meta.env.VITE_BOT_USERNAME ?? 'AmongGasBot';
+    const url = `https://t.me/${botName}/game?startapp=${roomCode}`;
     const tg = (window as Window & {
       Telegram?: { WebApp?: { shareExternalLink?(u: string): void } };
     }).Telegram?.WebApp;
