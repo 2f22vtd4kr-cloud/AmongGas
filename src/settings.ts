@@ -69,6 +69,28 @@ export const AMBIENT_CENTRES: Record<string, { x: number; y: number; radius: num
   weapons:         { x: 4450, y: 375,  radius: 400 },
 };
 
+// ── Sabotage ─────────────────────────────────────────────────────────────
+// Mirrors server/rooms/AmongGasRoom.ts — keep in sync. Fix-panel positions
+// reuse the AMBIENT_CENTRES room keys above rather than inventing new points.
+export const SABOTAGE_COOLDOWN_MS = 30_000;
+export const CRITICAL_SABOTAGE_MS = 45_000; // reactor / o2 meltdown window
+export const DOORS_LOCK_MS        = 15_000;
+export const SABOTAGE_ROOM_KEY: Record<'lights' | 'comms' | 'reactor' | 'o2', string> = {
+  lights:  'electrical_room',
+  comms:   'comms3',
+  reactor: 'reactor_room',
+  o2:      'oxygen_room',
+};
+export const SABOTAGE_LABELS: Record<'lights' | 'comms' | 'reactor' | 'o2' | 'doors', string> = {
+  lights:  'Lights',
+  comms:   'Comms',
+  reactor: 'Reactor',
+  o2:      'O2',
+  doors:   'Doors',
+};
+// Crew vision radius while 'lights' is active (impostor vision is unaffected).
+export const CREW_VISION_SABOTAGED = 65;
+
 // Task titles (from Python tasks.py)
 export const TASK_TITLES: Record<string, string> = {
   fix_wiring:       'Fix The Electricity Wires',

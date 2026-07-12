@@ -1,6 +1,6 @@
 import { Room, Client } from 'colyseus';
 import { ArraySchema } from '@colyseus/schema';
-import { GameRoomState, PlayerState, TaskState } from '../schema/GameState';
+import { GameRoomState, PlayerState, TaskState, SabotageType } from '../schema/GameState';
 import { validateInitData } from '../auth/telegram';
 
 // Mirror of src/settings.ts — keep in sync
@@ -13,6 +13,23 @@ const KILL_COOLDOWN_MS  = 15_000;
 const VOTE_TIMEOUT_MS   = 60_000;
 const CHAT_MAX_LEN      = 200;
 const CHAT_RATE_MS      = 500; // min ms between messages from the same player
+
+// ── Sabotage ─────────────────────────────────────────────────────────────
+// Fix-panel positions reuse the existing room centres from src/settings.ts's
+// AMBIENT_CENTRES (no new map data invented) — the same points already used
+// for ambient room sound zones, with the same radius as the "you're in this
+// room" catchment. 'doors' has no manual fix; it just expires.
+const SABOTAGE_COOLDOWN_MS  = 30_000;  // impostor cooldown after triggering a sabotage
+const SABOTAGE_SAFETY_MS    = 60_000;  // lights/comms auto-clear if nobody fixes them
+const CRITICAL_SABOTAGE_MS  = 45_000;  // reactor/o2 meltdown window — impostor wins if unfixed
+const DOORS_LOCK_MS         = 15_000;
+const SABOTAGE_TYPES: readonly Exclude<SabotageType, ''>[] = ['lights', 'comms', 'reactor', 'o2', 'doors'];
+const SABOTAGE_FIX_ZONES: Partial<Record<SabotageType, { x: number; y: number; radius: number }>> = {
+  lights:  { x: 2090, y: 1943, radius: 570 }, // electrical_room
+  comms:   { x: 3820, y: 2467, radius: 370 }, // comms3
+  reactor: { x: 729,  y: 1395, radius: 450 }, // reactor_room
+  o2:      { x: 1950, y: 500,  radius: 250 }, // oxygen_room
+};
 
 // Task world positions (from TMX — keep in sync with TmxParser output)
 const TASK_POSITIONS: Record<string, { x: number; y: number }> = {
@@ -49,6 +66,8 @@ export class AmongGasRoom extends Room {
   private lastChatAt     = new Map<string, number>();
   // Track which sessionId is the impostor (not exposed in schema)
   private impostorSid    = '';
+  private sabotageCooldownUntil = 0;
+  private sabotageTimer: ReturnType<typeof setTimeout> | null = null;
 
   onCreate(_options: Record<string, unknown>) {
     const tasks = new ArraySchema<TaskState>();
@@ -70,6 +89,8 @@ export class AmongGasRoom extends Room {
     this.onMessage('VOTE',        (client, msg) => this.handleVote(client, msg));
     this.onMessage('TASK_DONE',   (client, msg) => this.handleTaskDone(client, msg));
     this.onMessage('CHAT_SEND',   (client, msg) => this.handleChat(client, msg));
+    this.onMessage('SABOTAGE',      (client, msg) => this.handleSabotage(client, msg));
+    this.onMessage('SABOTAGE_FIX',  (client)      => this.handleSabotageFix(client));
 
     console.log(`[AmongGasRoom] ${this.roomId} created`);
   }
@@ -133,6 +154,7 @@ export class AmongGasRoom extends Room {
 
   onDispose() {
     if (this.voteTimer) clearTimeout(this.voteTimer);
+    if (this.sabotageTimer) clearTimeout(this.sabotageTimer);
     console.log(`[AmongGasRoom] ${this.roomId} disposed`);
   }
 
@@ -160,6 +182,11 @@ export class AmongGasRoom extends Room {
     this.emergencyUses.forEach((_, k) => this.emergencyUses.set(k, 0));
     this.killCooldowns.forEach((_, k) => this.killCooldowns.set(k, 0));
     this.lastChatAt.clear();
+    if (this.sabotageTimer) { clearTimeout(this.sabotageTimer); this.sabotageTimer = null; }
+    this.sabotageCooldownUntil = 0;
+    this.state.sabotageType = '';
+    this.state.sabotageEndsAt = 0;
+    this.state.sabotageLockedTasks = new ArraySchema<string>();
 
     this.state.phase = 'GAME';
 
@@ -302,6 +329,8 @@ export class AmongGasRoom extends Room {
 
     if (!p?.isAlive || client.sessionId === this.impostorSid) return;
     if (!task || task.completed) return;
+    if (this.state.sabotageLockedTasks.includes(task.id))
+      return client.send('ERROR', { code: 'DOOR_LOCKED' });
 
     const pos = TASK_POSITIONS[task.objectName];
     if (!pos) return;
@@ -310,6 +339,110 @@ export class AmongGasRoom extends Room {
     task.completed = true;
     this.state.tasksDone++;
     this.checkWinConditions();
+  }
+
+  /**
+   * Impostor-only. Triggers one of the five sabotage types. Only one
+   * sabotage may be active at a time, and there's a cooldown between
+   * sabotages (starts counting from the trigger, not from when it resolves,
+   * so quickly fixing one doesn't let the impostor immediately chain another).
+   * 'doors' locks two random tasks and auto-expires; 'lights'/'comms' persist
+   * until a crew (or the impostor — matches the original, proximity-only)
+   * member fixes them, with a safety auto-clear so the game can't hard-lock;
+   * 'reactor'/'o2' are critical — the impostor wins outright if nobody fixes
+   * them before the deadline.
+   */
+  private handleSabotage(client: Client, msg: { type?: string }) {
+    if (this.state.phase !== 'GAME') return;
+    if (client.sessionId !== this.impostorSid)
+      return client.send('ERROR', { code: 'NOT_IMPOSTOR' });
+    if (this.state.sabotageType !== '')
+      return client.send('ERROR', { code: 'SABOTAGE_ACTIVE' });
+
+    const now = Date.now();
+    if (now < this.sabotageCooldownUntil)
+      return client.send('ERROR', { code: 'SABOTAGE_COOLDOWN' });
+
+    const type = msg?.type as SabotageType | undefined;
+    if (!type || !SABOTAGE_TYPES.includes(type as Exclude<SabotageType, ''>))
+      return client.send('ERROR', { code: 'BAD_SABOTAGE_TYPE' });
+
+    this.state.sabotageType = type;
+    this.sabotageCooldownUntil = now + SABOTAGE_COOLDOWN_MS;
+
+    let lockedTasks: string[] = [];
+    let durationMs: number;
+    if (type === 'doors') {
+      durationMs = DOORS_LOCK_MS;
+      const incomplete = this.state.tasks.filter(t => !t.completed);
+      const pool = (incomplete.length >= 2 ? incomplete : [...this.state.tasks]);
+      const shuffled = [...pool].sort(() => Math.random() - 0.5);
+      lockedTasks = shuffled.slice(0, Math.min(2, shuffled.length)).map(t => t.id);
+      this.state.sabotageLockedTasks = new ArraySchema<string>(...lockedTasks);
+    } else if (type === 'reactor' || type === 'o2') {
+      durationMs = CRITICAL_SABOTAGE_MS;
+    } else {
+      durationMs = SABOTAGE_SAFETY_MS;
+    }
+
+    const endsAt = now + durationMs;
+    this.state.sabotageEndsAt = endsAt;
+    this.broadcast('SABOTAGE_START', {
+      type, endsAt, cooldownUntil: this.sabotageCooldownUntil, lockedTasks,
+    });
+
+    this.sabotageTimer = setTimeout(() => this.onSabotageTimeout(type), durationMs);
+  }
+
+  /** Fires when a sabotage's clock runs out without being fixed. */
+  private onSabotageTimeout(type: SabotageType) {
+    if (this.state.sabotageType !== type) return; // already fixed/cleared
+
+    if (type === 'reactor' || type === 'o2') {
+      // Don't decide the game mid-meeting — give the crew a moment after the
+      // vote to react instead of losing on a clock they couldn't see resolve.
+      if (this.state.phase !== 'GAME') {
+        this.sabotageTimer = setTimeout(() => this.onSabotageTimeout(type), 2000);
+        return;
+      }
+      this.clearSabotage('expired');
+      this.endGame('impostor');
+      return;
+    }
+
+    this.clearSabotage(type === 'doors' ? 'expired' : 'timeout');
+  }
+
+  /**
+   * Manual fix for lights/comms/reactor/o2 — any alive player standing near
+   * the relevant panel resolves it (matches the original: fixing isn't
+   * restricted to crew, though the impostor sabotaging their own work would
+   * be unusual). 'doors' has no manual fix; it only expires.
+   */
+  private handleSabotageFix(client: Client) {
+    if (this.state.phase !== 'GAME') return;
+    const type = this.state.sabotageType;
+    if (type === '' || type === 'doors') return;
+
+    const p = this.state.players.get(client.sessionId);
+    if (!p?.isAlive) return;
+
+    const zone = SABOTAGE_FIX_ZONES[type];
+    if (!zone || dist(p.x, p.y, zone.x, zone.y) > zone.radius) return;
+
+    this.clearSabotage('fixed');
+  }
+
+  /** Clears whatever sabotage is active (if any) and tells everyone why. */
+  private clearSabotage(reason: 'fixed' | 'expired' | 'timeout') {
+    const type = this.state.sabotageType;
+    if (type === '') return;
+    if (this.sabotageTimer) { clearTimeout(this.sabotageTimer); this.sabotageTimer = null; }
+
+    this.state.sabotageType = '';
+    this.state.sabotageEndsAt = 0;
+    this.state.sabotageLockedTasks = new ArraySchema<string>();
+    this.broadcast('SABOTAGE_END', { type, reason });
   }
 
   /**

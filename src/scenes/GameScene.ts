@@ -8,8 +8,12 @@ import {
   BOT_POS, ALL_COLORS, PLAYER_SPAWN, WORLD_WIDTH, WORLD_HEIGHT,
   INTERACT_RADIUS, KILL_RADIUS, REPORT_RADIUS, NO_OF_MISSIONS,
   AMBIENT_CENTRES, TASK_TITLES, CAMERA_ZOOM,
-  CREW_VISION, IMP_VISION,
+  CREW_VISION, IMP_VISION, CREW_VISION_SABOTAGED,
+  SABOTAGE_ROOM_KEY, SABOTAGE_LABELS,
 } from '../settings';
+
+type SabotageType = '' | 'lights' | 'comms' | 'reactor' | 'o2' | 'doors';
+const FIXABLE_SABOTAGE_TYPES: Exclude<SabotageType, '' | 'doors'>[] = ['lights', 'comms', 'reactor', 'o2'];
 import type { TaskDef, BotData } from '../types';
 import { parseTmx } from '../utils/TmxParser';
 import { fitContain } from '../utils/imageFit';
@@ -128,6 +132,10 @@ export class GameScene extends Phaser.Scene {
 
   // --- task list HUD ---
   private taskListRows: Phaser.GameObjects.Text[] = [];
+  private taskListBg?: Phaser.GameObjects.Rectangle;
+  private taskListHdr?: Phaser.GameObjects.Text;
+  private commsDownLabel?: Phaser.GameObjects.Text;
+  private commsDownActive = false;
 
   // --- task compass (one directional arrow per incomplete task) ---
   private selectedTaskId: string | null = null;
@@ -158,6 +166,17 @@ export class GameScene extends Phaser.Scene {
   private emergencyBtn!: Phaser.GameObjects.Container;
   private miniMapBtn!: Phaser.GameObjects.Image;
   private miniMapOverlay?: Phaser.GameObjects.Container;
+  private sabotageBtn?: Phaser.GameObjects.Container;
+  private sabotageMenu?: Phaser.GameObjects.Container;
+  private sabotageBanner?: Phaser.GameObjects.Container;
+  private sabotageBannerText?: Phaser.GameObjects.Text;
+
+  // --- sabotage (multiplayer only; server-authoritative) ---
+  private sabotageType: SabotageType = '';
+  private sabotageEndsAt = 0;
+  private sabotageCooldownUntil = 0;
+  private sabotageLockedTasks: string[] = [];
+  private nearSabotagePanel = false;
 
   // --- input ---
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
@@ -440,6 +459,38 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  // --- doors sabotage: visual lock markers on affected task sprites ---
+  private doorLockMarkers = new Map<string, Phaser.GameObjects.Text>();
+
+  /**
+   * No dedicated "locked" sprite art exists (Strict Asset Rule — see
+   * HANDOFF.md), so locked tasks get a drawn 🔒 badge over their existing
+   * world sprite plus a red tint, mirroring how USE/REPORT already fall back
+   * to drawn glyphs where no art exists.
+   */
+  private updateDoorLocks() {
+    const lockedObjNames = new Set(
+      this.sabotageLockedTasks
+        .map(id => this.tasks.find(t => t.id === id)?.objectName)
+        .filter((n): n is string => !!n),
+    );
+
+    for (const [objName, sprite] of this.taskSprites) {
+      const locked = lockedObjNames.has(objName);
+      if (locked && !this.doorLockMarkers.has(objName)) {
+        sprite.setTint(0xff5555);
+        const marker = this.add.text(sprite.x, sprite.y - 40, '🔒', { fontSize: '28px' })
+          .setOrigin(0.5).setDepth(6);
+        this.uiCamera.ignore(marker);
+        this.doorLockMarkers.set(objName, marker);
+      } else if (!locked && this.doorLockMarkers.has(objName)) {
+        sprite.clearTint();
+        this.doorLockMarkers.get(objName)?.destroy();
+        this.doorLockMarkers.delete(objName);
+      }
+    }
+  }
+
   // ────────────────── HUD ──────────────────
 
   private buildHUD() {
@@ -510,6 +561,19 @@ export class GameScene extends Phaser.Scene {
 
     this.useBtn = this.buildActionButton(actionX, H - 130 - sb, 64, 0xdddddd, '✋', 'USE', () => this.tryInteract());
     this.useBtn.setVisible(false);
+
+    // Sabotage button — impostor-only, always available (not proximity
+    // gated like KILL/USE), sits above the kill button in the stack. Uses
+    // the real sabotage_icon.png art; dims via sabotage_icon_dim.png while
+    // on cooldown or while a sabotage is already active.
+    if (this.isMultiplayer && this.player.isImpostor) {
+      this.sabotageBtn = this.buildImageButton(actionX, H - 520 - sb, 'ui_sabotage_icon', 72, 72, () => this.toggleSabotageMenu());
+      this.buildSabotageMenu(actionX, H - 520 - sb);
+    }
+
+    // Sabotage banner — top-of-screen alert shown to everyone while a
+    // sabotage is active (countdown for reactor/o2, status text for the rest).
+    this.buildSabotageBanner();
 
     // Task list panel — left side, below emergency button
     this.buildTaskListInHud();
@@ -622,7 +686,17 @@ export class GameScene extends Phaser.Scene {
       fontSize: '15px', color: '#99bbdd', fontStyle: 'bold', fontFamily: 'Arial',
       stroke: '#000', strokeThickness: 2,
     });
+    this.taskListBg = bg;
+    this.taskListHdr = hdr;
     this.hud.add([bg, hdr]);
+
+    // 'comms' sabotage hides the task list + compass entirely (matches the
+    // original: comms knocks out the task tracker, not just chat/admin).
+    this.commsDownLabel = this.add.text(listX + 8, listY + 5, 'COMMS DOWN', {
+      fontSize: '15px', color: '#ff5555', fontStyle: 'bold', fontFamily: 'Arial',
+      stroke: '#000', strokeThickness: 2,
+    }).setVisible(false);
+    this.hud.add(this.commsDownLabel);
 
     this.taskListRows = [];
     for (let i = 0; i < this.tasks.length; i++) {
@@ -667,6 +741,9 @@ export class GameScene extends Phaser.Scene {
     ];
     if (this.joystickBase) hudObjects.push(this.joystickBase);
     if (this.joystickThumb) hudObjects.push(this.joystickThumb);
+    if (this.sabotageBtn) hudObjects.push(this.sabotageBtn);
+    if (this.sabotageMenu) hudObjects.push(this.sabotageMenu);
+    if (this.sabotageBanner) hudObjects.push(this.sabotageBanner);
 
     this.cameras.main.ignore(hudObjects);
     const hudSet = new Set(hudObjects);
@@ -741,7 +818,11 @@ export class GameScene extends Phaser.Scene {
     const sx = (this.player.x - cam.worldView.x) * cam.zoom;
     const sy = (this.player.y - cam.worldView.y) * cam.zoom;
 
-    const baseR = (this.player.isImpostor ? IMP_VISION : CREW_VISION) * cam.zoom;
+    // 'lights' sabotage tanks crew vision only — impostors see normally,
+    // matching the original game (lights is a crew-blinding tool, not a
+    // mutual blackout).
+    const crewVision = (this.sabotageType === 'lights') ? CREW_VISION_SABOTAGED : CREW_VISION;
+    const baseR = (this.player.isImpostor ? IMP_VISION : crewVision) * cam.zoom;
 
     this.fogMaskInner.clear();
     this.fogMaskInner.fillStyle(0xffffff);
@@ -775,6 +856,88 @@ export class GameScene extends Phaser.Scene {
       .setInteractive(hitArea, Phaser.Geom.Circle.Contains);
     container.on('pointerdown', onTap);
     return container;
+  }
+
+  /**
+   * Small pop-up list of the five sabotage types, anchored above the
+   * sabotage button. Hidden until toggleSabotageMenu() opens it; tapping a
+   * row sends SABOTAGE and closes it again.
+   */
+  private buildSabotageMenu(anchorX: number, anchorY: number) {
+    const rowH = 36, rowW = 130, gap = 4;
+    const types: Exclude<SabotageType, ''>[] = ['lights', 'comms', 'reactor', 'o2', 'doors'];
+    const rows: Phaser.GameObjects.GameObject[] = [];
+    types.forEach((type, i) => {
+      const y = -((types.length - i) * (rowH + gap));
+      const bg = this.add.rectangle(0, y, rowW, rowH, 0x1a1a1a, 0.9).setStrokeStyle(1.5, 0xff3b3b, 0.9);
+      const label = this.add.text(0, y, SABOTAGE_LABELS[type], {
+        fontSize: '15px', color: '#fff', fontFamily: 'Arial', fontStyle: 'bold',
+      }).setOrigin(0.5);
+      const hit = this.add.rectangle(0, y, rowW, rowH, 0x000000, 0)
+        .setInteractive({ useHandCursor: true })
+        .on('pointerdown', () => {
+          NetworkManager.room?.send('SABOTAGE', { type });
+          this.setSabotageMenuVisible(false);
+        });
+      rows.push(bg, label, hit);
+    });
+    this.sabotageMenu = this.add.container(anchorX, anchorY, rows)
+      .setScrollFactor(0).setDepth(102).setVisible(false);
+  }
+
+  private lastSabotageToggleAt = -1000;
+  private toggleSabotageMenu() {
+    // Buttons in this HUD are hit-tested twice per tap (their own Container
+    // listener, plus the iOS-safe fallback in handleActionButtonTap) — every
+    // other action button tolerates that because its action is idempotent
+    // under a cooldown guard, but a raw visibility toggle would just flicker
+    // open/closed. this.time.now doesn't advance between the two synchronous
+    // calls from the same native event, so this dedupes them.
+    if (this.time.now - this.lastSabotageToggleAt < 50) return;
+    this.lastSabotageToggleAt = this.time.now;
+    if (this.sabotageType !== '' || Date.now() < this.sabotageCooldownUntil) return;
+    this.setSabotageMenuVisible(!this.sabotageMenu?.visible);
+  }
+
+  private setSabotageMenuVisible(visible: boolean) {
+    this.sabotageMenu?.setVisible(visible);
+  }
+
+  /**
+   * Top-of-screen banner shown to every player (not just the impostor)
+   * while a sabotage is active: status text for lights/comms/doors, and a
+   * live countdown for the critical reactor/o2 meltdown window.
+   */
+  private buildSabotageBanner() {
+    const { width: W } = this.scale;
+    const bg = this.add.rectangle(0, 0, W, 40, 0x7a0000, 0.85);
+    this.sabotageBannerText = this.add.text(0, 0, '', {
+      fontSize: '17px', color: '#fff', fontFamily: 'Arial', fontStyle: 'bold',
+    }).setOrigin(0.5);
+    this.sabotageBanner = this.add.container(W / 2, 20 + this.safeTop, [bg, this.sabotageBannerText])
+      .setScrollFactor(0).setDepth(150).setVisible(false);
+  }
+
+  private updateSabotageBanner() {
+    if (!this.sabotageBanner || !this.sabotageBannerText) return;
+    if (this.sabotageType === '') {
+      this.sabotageBanner.setVisible(false);
+      return;
+    }
+    const label = SABOTAGE_LABELS[this.sabotageType];
+    let text: string;
+    if (this.sabotageType === 'reactor' || this.sabotageType === 'o2') {
+      const remaining = Math.max(0, Math.ceil((this.sabotageEndsAt - Date.now()) / 1000));
+      const mm = Math.floor(remaining / 60);
+      const ss = String(remaining % 60).padStart(2, '0');
+      text = `⚠ ${label.toUpperCase()} MELTDOWN — FIX NOW! ${mm}:${ss}`;
+    } else if (this.sabotageType === 'doors') {
+      text = `🔒 Doors sabotaged — 2 tasks locked`;
+    } else {
+      text = `⚠ ${label} sabotaged — find and fix the panel`;
+    }
+    this.sabotageBannerText.setText(text);
+    this.sabotageBanner.setVisible(true);
   }
 
   /**
@@ -884,6 +1047,13 @@ export class GameScene extends Phaser.Scene {
         return;
       }
     }
+    if (this.sabotageBtn?.visible) {
+      const sy = H - 520 - sb;
+      if (Phaser.Math.Distance.Between(px, py, actionX, sy) < tapR) {
+        this.toggleSabotageMenu();
+        return;
+      }
+    }
     // Top-left: emergency button fallback
     const emergBtnX = EMERGENCY_BTN_W / 2 + 12, emergBtnY = EMERGENCY_BTN_H / 2 + 56 + this.safeTop;
     if (Phaser.Math.Distance.Between(px, py, emergBtnX, emergBtnY) < Math.max(EMERGENCY_BTN_W, EMERGENCY_BTN_H) / 2) {
@@ -905,6 +1075,17 @@ export class GameScene extends Phaser.Scene {
       }
     }
     if (this.emergencyCooldown > 0) this.emergencyCooldown -= delta;
+
+    // Sabotage: live countdown banner + button dim/enable state
+    if (this.isMultiplayer) {
+      if (this.sabotageType !== '') this.updateSabotageBanner();
+      if (this.sabotageBtn) {
+        const key = this.sabotageType === '' && Date.now() >= this.sabotageCooldownUntil
+          ? 'ui_sabotage_icon' : 'ui_sabotage_dim';
+        const img = this.sabotageBtn.list[0] as Phaser.GameObjects.Image;
+        if (img.texture.key !== key) img.setTexture(key);
+      }
+    }
 
     // Player
     this.player.update(this.cursors, this.wasd, delta, this.joystickForce);
@@ -941,8 +1122,14 @@ export class GameScene extends Phaser.Scene {
     // Update task bar
     this.updateTaskBar();
 
-    // Update per-task directional compass arrows
-    this.updateTaskArrows();
+    // 'comms' sabotage blacks out the task list + compass until fixed
+    const commsDown = this.isMultiplayer && this.sabotageType === 'comms';
+    this.setCommsDownVisual(commsDown);
+    if (!commsDown) this.updateTaskArrows();
+
+    // Sabotage visual effects that depend on world-sprite positions
+    if (this.isMultiplayer && this.sabotageLockedTasks.length > 0) this.updateDoorLocks();
+    else if (this.doorLockMarkers.size > 0) this.updateDoorLocks(); // clears leftovers when doors sabotage ends
 
     // Win check (Freeplay only — multiplayer win conditions are decided by the server, Phase 3)
     if (!this.isMultiplayer) this.checkWinConditions();
@@ -1046,6 +1233,25 @@ export class GameScene extends Phaser.Scene {
 
     room.onMessage('POSITION_CORRECTION', (msg: { x: number; y: number }) => {
       this.player.setPosition(msg.x, msg.y);
+    });
+
+    room.onMessage('SABOTAGE_START', (msg: {
+      type: Exclude<SabotageType, ''>; endsAt: number; cooldownUntil: number; lockedTasks: string[];
+    }) => {
+      this.sabotageType = msg.type;
+      this.sabotageEndsAt = msg.endsAt;
+      this.sabotageCooldownUntil = msg.cooldownUntil;
+      this.sabotageLockedTasks = msg.lockedTasks ?? [];
+      this.setSabotageMenuVisible(false);
+      this.updateSabotageBanner();
+      this.sound.play('sfx_emergency', { volume: 0.5 });
+    });
+
+    room.onMessage('SABOTAGE_END', (_msg: { type: SabotageType; reason: 'fixed' | 'expired' | 'timeout' }) => {
+      this.sabotageType = '';
+      this.sabotageEndsAt = 0;
+      this.sabotageLockedTasks = [];
+      this.updateSabotageBanner();
     });
   }
 
@@ -1195,12 +1401,24 @@ export class GameScene extends Phaser.Scene {
     // Update world-sprite textures for task interactables
     this.updateTaskSprites();
 
+    // Sabotage fix panel — any alive player standing near the active
+    // sabotage's room can fix it (doors has no manual fix, it just expires).
+    this.nearSabotagePanel = false;
+    if (this.isMultiplayer && FIXABLE_SABOTAGE_TYPES.includes(this.sabotageType as typeof FIXABLE_SABOTAGE_TYPES[number])) {
+      const zone = AMBIENT_CENTRES[SABOTAGE_ROOM_KEY[this.sabotageType as keyof typeof SABOTAGE_ROOM_KEY]];
+      if (zone && Phaser.Math.Distance.Between(px, py, zone.x, zone.y) < zone.radius) {
+        this.nearSabotagePanel = true;
+      }
+    }
+
     // Prompt
     const nearEmergency = eDist < INTERACT_RADIUS * 1.5 && this.player.isAlive;
     if (this.nearbyTask) {
       this.interactPrompt
         .setText(`[E] ${this.nearbyTask.title}`)
         .setVisible(true);
+    } else if (this.nearSabotagePanel) {
+      this.interactPrompt.setText(`[E] Fix ${SABOTAGE_LABELS[this.sabotageType as keyof typeof SABOTAGE_LABELS]}`).setVisible(true);
     } else if (nearEmergency) {
       this.interactPrompt.setText('[E] Emergency Meeting').setVisible(true);
     } else if (this.nearbyCorpse) {
@@ -1211,7 +1429,7 @@ export class GameScene extends Phaser.Scene {
 
     // Contextual action buttons — only show the ones that are actionable
     // right now, so the bottom-right thumb zone doesn't clutter the screen.
-    this.useBtn.setVisible(!!this.nearbyTask || nearEmergency);
+    this.useBtn.setVisible(!!this.nearbyTask || this.nearSabotagePanel || nearEmergency);
 
     if (this.isMultiplayer) {
       // In multiplayer: report shows when near a dead remote player's body
@@ -1252,6 +1470,12 @@ export class GameScene extends Phaser.Scene {
     }
 
     if (!this.player.isAlive) return;
+
+    // Sabotage fix panel (multiplayer only)
+    if (this.nearSabotagePanel) {
+      NetworkManager.room?.send('SABOTAGE_FIX');
+      return;
+    }
 
     // Emergency button (alive players only)
     const eDist = Phaser.Math.Distance.Between(this.player.x, this.player.y, this.emergencyPos.x, this.emergencyPos.y);
@@ -1337,6 +1561,15 @@ export class GameScene extends Phaser.Scene {
         this.taskListRows[i].setText(`\u25a1 ${label}`).setColor('#aaaaaa');
       }
     }
+  }
+
+  private setCommsDownVisual(active: boolean) {
+    if (active === this.commsDownActive) return;
+    this.commsDownActive = active;
+    this.taskListHdr?.setVisible(!active);
+    for (const row of this.taskListRows) row.setVisible(!active);
+    this.commsDownLabel?.setVisible(active);
+    if (active) for (const entry of this.taskArrows) entry.container.setVisible(false);
   }
 
   private updateTaskBar() {
