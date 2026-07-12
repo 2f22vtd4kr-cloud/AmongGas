@@ -92,8 +92,25 @@ export class GameScene extends Phaser.Scene {
   private killCooldown = 0;
   private emergencyCooldown = 0;
 
-  // --- ambient sounds ---
+  // --- ambient sounds (lazy-loaded on first zone entry) ---
   private ambientPlaying: Set<string> = new Set();
+  private ambientPending: Set<string> = new Set();
+
+  private static readonly AMBIENT_FILE_MAP: Record<string, string> = {
+    cafeteria:       'Assets/Sounds/Ambience/AMB_Cafeteria.wav',
+    medbay_room:     'Assets/Sounds/Ambience/AMB_MedbayRoom.wav',
+    security_room:   'Assets/Sounds/Ambience/AMB_SecurityRoom.wav',
+    reactor_room:    'Assets/Sounds/Ambience/AMB_ReactorRoom.wav',
+    u_engine_room:   'Assets/Sounds/Ambience/AMB_EngineRoom.wav',
+    l_engine_room:   'Assets/Sounds/Ambience/AMB_EngineRoom.wav',
+    electrical_room: 'Assets/Sounds/Ambience/AMB_ElectricRoom.wav',
+    storage_room:    'Assets/Sounds/Ambience/AMB_Storage.wav',
+    admin_room:      'Assets/Sounds/Ambience/AMB_Admin.wav',
+    comms3:          'Assets/Sounds/Ambience/AMB_Comms.wav',
+    oxygen_room:     'Assets/Sounds/Ambience/AMB_Oxygen.wav',
+    cockpit:         'Assets/Sounds/Ambience/AMB_Cockpit.wav',
+    weapons:         'Assets/Sounds/Ambience/AMB_Weapons.wav',
+  };
 
   // --- interaction markers ---
   private interactZones: { obj: TaskDef | null; name: string; x: number; y: number; sprite?: Phaser.GameObjects.Sprite }[] = [];
@@ -1223,19 +1240,37 @@ export class GameScene extends Phaser.Scene {
   private updateAmbient() {
     const px = this.player.x, py = this.player.y;
     for (const [key, centre] of Object.entries(AMBIENT_CENTRES)) {
-      const d = Phaser.Math.Distance.Between(px, py, centre.x, centre.y);
+      const d   = Phaser.Math.Distance.Between(px, py, centre.x, centre.y);
       const sndKey = `amb_${key}`;
-      if (!this.sound.get(sndKey)) continue;
-      if (d <= centre.radius) {
-        if (!this.ambientPlaying.has(key)) {
+      const inZone = d <= centre.radius;
+
+      if (inZone && !this.ambientPlaying.has(key) && !this.ambientPending.has(key)) {
+        if (this.cache.audio.exists(sndKey)) {
+          // Already downloaded from a previous visit — play immediately
           this.sound.play(sndKey, { loop: true, volume: 0.25 });
           this.ambientPlaying.add(key);
+        } else {
+          // First visit: kick off a dynamic load (non-blocking)
+          const filePath = GameScene.AMBIENT_FILE_MAP[key];
+          if (!filePath) continue;
+          this.ambientPending.add(key);
+          this.load.audio(sndKey, filePath);
+          this.load.once('complete', () => {
+            this.ambientPending.delete(key);
+            // Only play if the player is still in the zone
+            if (this.gameOver || !this.ambientPending.has(key) === false) return;
+            const curDist = Phaser.Math.Distance.Between(
+              this.player.x, this.player.y, centre.x, centre.y);
+            if (curDist <= centre.radius && !this.ambientPlaying.has(key)) {
+              this.sound.play(sndKey, { loop: true, volume: 0.25 });
+              this.ambientPlaying.add(key);
+            }
+          });
+          this.load.start();
         }
-      } else {
-        if (this.ambientPlaying.has(key)) {
-          this.sound.stopByKey(sndKey);
-          this.ambientPlaying.delete(key);
-        }
+      } else if (!inZone && this.ambientPlaying.has(key)) {
+        this.sound.stopByKey(sndKey);
+        this.ambientPlaying.delete(key);
       }
     }
   }

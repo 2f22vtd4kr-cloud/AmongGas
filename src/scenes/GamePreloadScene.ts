@@ -251,20 +251,8 @@ export class GamePreloadScene extends Phaser.Scene {
       this.load.audio(`sfx_step_${i}`, `Assets/Sounds/Footsteps/Footstep0${i}.wav`);
     }
 
-    // ── Room ambience (matched to AMBIENT_CENTRES keys) ──────────
-    this.load.audio('amb_cafeteria',       'Assets/Sounds/Ambience/AMB_Cafeteria.wav');
-    this.load.audio('amb_medbay_room',     'Assets/Sounds/Ambience/AMB_MedbayRoom.wav');
-    this.load.audio('amb_security_room',   'Assets/Sounds/Ambience/AMB_SecurityRoom.wav');
-    this.load.audio('amb_reactor_room',    'Assets/Sounds/Ambience/AMB_ReactorRoom.wav');
-    this.load.audio('amb_u_engine_room',   'Assets/Sounds/Ambience/AMB_EngineRoom.wav');
-    this.load.audio('amb_l_engine_room',   'Assets/Sounds/Ambience/AMB_EngineRoom.wav');
-    this.load.audio('amb_electrical_room', 'Assets/Sounds/Ambience/AMB_ElectricRoom.wav');
-    this.load.audio('amb_storage_room',    'Assets/Sounds/Ambience/AMB_Storage.wav');
-    this.load.audio('amb_admin_room',      'Assets/Sounds/Ambience/AMB_Admin.wav');
-    this.load.audio('amb_comms3',          'Assets/Sounds/Ambience/AMB_Comms.wav');
-    this.load.audio('amb_oxygen_room',     'Assets/Sounds/Ambience/AMB_Oxygen.wav');
-    this.load.audio('amb_cockpit',         'Assets/Sounds/Ambience/AMB_Cockpit.wav');
-    this.load.audio('amb_weapons',         'Assets/Sounds/Ambience/AMB_Weapons.wav');
+    // Room ambience sounds are lazy-loaded on first zone entry in GameScene
+    // to avoid adding ~16 MB to the initial preload barrier.
   }
 
   create() {
