@@ -81,6 +81,7 @@ export class GameScene extends Phaser.Scene {
 
   // --- physics ---
   private walls!: Phaser.Physics.Arcade.StaticGroup;
+  private playerWallCollider!: Phaser.Physics.Arcade.Collider;
 
   // --- game state ---
   public tasks: TaskDef[] = [];
@@ -207,7 +208,7 @@ export class GameScene extends Phaser.Scene {
 
     // ── Player ──
     this.player = new Player(this, PLAYER_SPAWN.x, PLAYER_SPAWN.y, playerColor, playerName);
-    this.physics.add.collider(this.player, this.walls);
+    this.playerWallCollider = this.physics.add.collider(this.player, this.walls);
 
     // Prevent bots from standing on top of the player
     for (const bot of this.bots) {
@@ -446,13 +447,13 @@ export class GameScene extends Phaser.Scene {
     // real Assets/Images/UI/kill_icon.png art like the original HUD.
     const actionX = 68;
     const sb = this.safeBot;
-    this.killBtn = this.buildImageButton(actionX, H - 320 - sb, 'ui_kill_icon', 76, 76, () => this.attemptKill());
+    this.killBtn = this.buildImageButton(actionX, H - 390 - sb, 'ui_kill_icon', 76, 76, () => this.attemptKill());
     this.killBtn.setVisible(false);
 
-    this.reportBtn = this.buildActionButton(actionX, H - 190 - sb, 58, 0xdddddd, '🚩', 'REPORT', () => this.tryReport());
+    this.reportBtn = this.buildActionButton(actionX, H - 260 - sb, 58, 0xdddddd, '🚩', 'REPORT', () => this.tryReport());
     this.reportBtn.setVisible(false);
 
-    this.useBtn = this.buildActionButton(actionX, H - 60 - sb, 64, 0xdddddd, '✋', 'USE', () => this.tryInteract());
+    this.useBtn = this.buildActionButton(actionX, H - 130 - sb, 64, 0xdddddd, '✋', 'USE', () => this.tryInteract());
     this.useBtn.setVisible(false);
 
     // Task list panel — left side, below emergency button
@@ -729,21 +730,21 @@ export class GameScene extends Phaser.Scene {
     const tapR = 76; // generous finger radius, matches the enlarged buttons
 
     if (this.useBtn.visible) {
-      const uy = H - 60 - sb;
+      const uy = H - 130 - sb;
       if (Phaser.Math.Distance.Between(px, py, actionX, uy) < tapR) {
         this.tryInteract();
         return;
       }
     }
     if (this.reportBtn.visible) {
-      const ry = H - 190 - sb;
+      const ry = H - 260 - sb;
       if (Phaser.Math.Distance.Between(px, py, actionX, ry) < tapR) {
         this.tryReport();
         return;
       }
     }
     if (this.killBtn.visible) {
-      const ky = H - 320 - sb;
+      const ky = H - 390 - sb;
       if (Phaser.Math.Distance.Between(px, py, actionX, ky) < tapR) {
         this.attemptKill();
         return;
@@ -1004,7 +1005,7 @@ export class GameScene extends Phaser.Scene {
 
     // Player ejection — id -1 is used for the local player in MeetingScene
     if (ejectedId === -1) {
-      this.player.die();
+      this.killPlayer();
       const name = this.registry.get('playerName') ?? 'You';
       const t = this.add.text(W / 2, H / 2, `${name} was not the Impostor.`, {
         fontSize: '32px', color: '#ffffff',
@@ -1033,6 +1034,30 @@ export class GameScene extends Phaser.Scene {
     this.checkWinConditions();
   }
 
+  // ────────────────── Player death / ghost ──────────────────
+
+  /**
+   * Kills the local player: places a dead-body sprite at the current position,
+   * transitions the player sprite to ghost mode (semi-transparent, can still
+   * walk through walls), and removes the player-wall collider so the ghost
+   * passes through the map geometry.
+   */
+  private killPlayer() {
+    if (!this.player.isAlive) return;
+
+    // Place a dead body at the kill position before the player sprite changes
+    const lc = this.player.playerColor.toLowerCase();
+    const deadBody = this.add.image(this.player.x, this.player.y, `dead_${lc}`);
+    deadBody.setDepth(3);
+
+    this.player.die();
+
+    // Ghost mode: remove wall collision so the ghost walks through walls
+    if (this.player.isGhost) {
+      this.playerWallCollider?.destroy();
+    }
+  }
+
   // ────────────────── Impostor AI ──────────────────
 
   private impostorAct() {
@@ -1055,7 +1080,7 @@ export class GameScene extends Phaser.Scene {
 
     if (playerDist < minDist && playerDist < 300) {
       // Player is the closest target
-      this.player.die();
+      this.killPlayer();
       this.sound.play('sfx_kill', { volume: 0.6 });
       this.checkWinConditions();
       return;

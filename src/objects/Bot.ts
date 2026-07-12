@@ -49,7 +49,7 @@ export class Bot extends Phaser.Physics.Arcade.Sprite {
 
     this.nameLabel = scene.add.text(data.x, data.y - 45, data.name, {
       fontSize: '13px',
-      color: this.isImpostor ? '#ff4444' : '#ffffff',
+      color: '#ffffff',
       stroke: '#000',
       strokeThickness: 3,
       fontFamily: 'Arial',

@@ -7,6 +7,7 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
   public playerName: string;
   public playerColor: string;
   public isAlive = true;
+  public isGhost = false;
   public isImpostor = false;
   public tasksCompleted = 0;
   public lastDirection: Direction = 'down';
@@ -49,7 +50,8 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
     left: Phaser.Input.Keyboard.Key;
     right: Phaser.Input.Keyboard.Key;
   }, dt: number, joystickForce?: { x: number; y: number }) {
-    if (!this.isAlive) {
+    // Dead and not a ghost — freeze in place
+    if (!this.isAlive && !this.isGhost) {
       this.setVelocity(0, 0);
       this.nameLabel.setPosition(this.x, this.y - 55);
       return;
@@ -87,6 +89,12 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
 
     this.setVelocity(vx, vy);
 
+    // Ghost: skip walk animations and footsteps (ghost floats silently)
+    if (this.isGhost) {
+      this.nameLabel.setPosition(this.x, this.y - 55);
+      return;
+    }
+
     const moving = vx !== 0 || vy !== 0;
     const dir = this.lastDirection;
     const animKey = moving
@@ -114,13 +122,27 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
   die() {
     if (!this.isAlive) return; // guard against double-die
     this.isAlive = false;
-    this.anims.stop(); // stop walk animation so it doesn't keep overriding the dead texture
-    const lc = this.colorKey;
-    this.setTexture(`dead_${lc}`);
-    this.setDepth(3);
+    this.anims.stop();
     this.nameLabel.setVisible(false);
-    const body = this.body as Phaser.Physics.Arcade.Body;
-    body.enable = false;
+
+    const lc = this.colorKey;
+    const ghostKey = `${lc}_ghost_1`;
+
+    if (this.scene.textures.exists(ghostKey)) {
+      // Ghost mode — player becomes semi-transparent and can still walk
+      this.isGhost = true;
+      this.setTexture(ghostKey);
+      this.setAlpha(0.65);
+      this.setDepth(15); // render above living players so ghost is visible
+      // Physics body stays enabled; GameScene removes the wall collider
+      // so the ghost passes through walls
+    } else {
+      // No ghost art for this color — freeze the sprite in place
+      this.setTexture(`dead_${lc}`);
+      this.setDepth(3);
+      const body = this.body as Phaser.Physics.Arcade.Body;
+      body.enable = false;
+    }
   }
 
   destroy(fromScene?: boolean) {
