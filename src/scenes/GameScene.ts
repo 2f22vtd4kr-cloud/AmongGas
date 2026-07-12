@@ -696,9 +696,12 @@ export class GameScene extends Phaser.Scene {
     // Outer (transition) layer — lower alpha, larger hole
     this.fogOuter = this.add.rectangle(W / 2, H / 2, W, H, 0x000000, 0.4)
       .setScrollFactor(0).setDepth(48);
-    // Graphics used only as mask paths — setVisible(false) hides them visually
-    // while GeometryMask still reads their path data (Canvas + WebGL compatible).
-    this.fogMaskOuter = this.add.graphics().setVisible(false);
+    // Graphics used only as mask paths. scrollFactor(0) is REQUIRED: without it
+    // the canvas renderer applies the world-camera transform, shifting the drawn
+    // circle thousands of pixels off-screen and leaving the entire viewport dark.
+    // setVisible(false) hides the graphics visually; GeometryMask still reads
+    // the path data regardless of visibility.
+    this.fogMaskOuter = this.add.graphics().setScrollFactor(0).setVisible(false);
     const outerMask = this.fogMaskOuter.createGeometryMask();
     outerMask.invertAlpha = true;
     this.fogOuter.setMask(outerMask);
@@ -706,7 +709,7 @@ export class GameScene extends Phaser.Scene {
     // Inner (darkness) layer — high alpha, standard hole
     this.fogInner = this.add.rectangle(W / 2, H / 2, W, H, 0x000000, 0.92)
       .setScrollFactor(0).setDepth(49);
-    this.fogMaskInner = this.add.graphics().setVisible(false);
+    this.fogMaskInner = this.add.graphics().setScrollFactor(0).setVisible(false);
     const innerMask = this.fogMaskInner.createGeometryMask();
     innerMask.invertAlpha = true;
     this.fogInner.setMask(innerMask);

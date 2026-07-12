@@ -28,10 +28,16 @@ const sy = (this.player.y - cam.worldView.y) * cam.zoom;
 const baseR = (player.isImpostor ? IMP_VISION : CREW_VISION) * cam.zoom;
 ```
 
-## Gotcha: `{ add: false }` removed from Phaser 3.90 typings
-`this.make.graphics({ add: false })` throws TS2353 in Phaser 3.90 — `add` is not in the `Options` type.  
-Fix: `this.add.graphics().setVisible(false)` — GeometryMask reads path data regardless of visibility.  
-Also call `this.uiCamera.ignore([fogInner, fogOuter, fogMaskInner, fogMaskOuter])` so HUD camera doesn't double-render them.
+## Gotcha 1: mask Graphics MUST have `setScrollFactor(0)` — critical
+Without `setScrollFactor(0)`, the canvas renderer applies the world-camera transform to the mask Graphics.  
+The circle is drawn at e.g. `(375, 667)` in local space, but after camera transform that maps to `~(-4881, …)` — thousands of pixels off-screen.  
+Result: mask clips nothing → entire viewport is dark.  
+**Fix:** `this.add.graphics().setScrollFactor(0).setVisible(false)` on BOTH mask objects.
+
+## Gotcha 2: `{ add: false }` removed from Phaser 3.90 typings
+`this.make.graphics({ add: false })` throws TS2353 — `add` is not in the `Options` type.  
+Fix: `this.add.graphics().setScrollFactor(0).setVisible(false)`.  
+Also call `this.uiCamera.ignore([fogInner, fogOuter, fogMaskInner, fogMaskOuter])` so the HUD camera doesn't double-render them.
 
 ## Tuning
 Adjust `CREW_VISION` / `IMP_VISION` in `src/settings.ts`. At zoom 1.45, 1 world unit ≈ 1.45 screen px. Viewport half-width ≈ 258 world units — a radius below that creates visible dark corners.
