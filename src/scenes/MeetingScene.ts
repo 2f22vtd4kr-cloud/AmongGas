@@ -1,7 +1,11 @@
 import Phaser from 'phaser';
 import type { GameScene } from './GameScene';
+import { NetworkManager } from '../network/NetworkManager';
 
-interface MeetingData {
+// ── Data shapes ──────────────────────────────────────────────────────────────
+
+interface FreeMeetingData {
+  mode?: 'freeplay';
   gameScene: GameScene;
   playerName: string;
   playerColor: string;
@@ -9,11 +13,38 @@ interface MeetingData {
   aliveBots: { id: number; name: string; color: string }[];
 }
 
+interface MultiMeetingData {
+  mode: 'multiplayer';
+  gameScene: GameScene;
+  playerSessionId: string;
+  playerName: string;
+  playerColor: string;
+  playerAlive: boolean;
+  players: { sessionId: string; name: string; color: string }[];
+}
+
+type MeetingData = FreeMeetingData | MultiMeetingData;
+
+// ── Unified voter row (id is always string) ───────────────────────────────────
+
+interface Voter {
+  id: string;
+  name: string;
+  color: string;
+  isPlayer: boolean;
+}
+
+// ── Scene ─────────────────────────────────────────────────────────────────────
+
 export class MeetingScene extends Phaser.Scene {
   private gameScene!: GameScene;
-  private voters: { id: number; name: string; color: string; isPlayer: boolean }[] = [];
-  private votes: Map<number | 'player', number | 'skip'> = new Map();
-  private votedFor: number | 'skip' | null = null;
+  private isMultiplayer = false;
+  private playerSessionId = '';
+
+  private voters: Voter[] = [];
+  private votes: Map<string, string | 'skip'> = new Map();
+  private votedFor: string | 'skip' | null = null;
+
   private votingTime = 60;
   private discussTime = 30;
   private phase: 'discuss' | 'vote' | 'result' = 'discuss';
@@ -28,28 +59,45 @@ export class MeetingScene extends Phaser.Scene {
 
   init(data: MeetingData) {
     this.gameScene = data.gameScene;
-    this.playerAlive = data.playerAlive;  // ← was never stored; dead player showed in list
-
-    // Dead players attend as ghosts: they are not vote targets and cannot vote
-    this.voters = [
-      ...(data.playerAlive
-        ? [{ id: -1, name: data.playerName, color: data.playerColor, isPlayer: true }]
-        : []),
-      ...data.aliveBots.map(b => ({ ...b, isPlayer: false })),
-    ];
+    this.playerAlive = data.playerAlive;
     this.votes.clear();
     this.votedFor = null;
     this.elapsed = 0;
     this.phase = 'discuss';
+
+    if (data.mode === 'multiplayer') {
+      this.isMultiplayer = true;
+      this.playerSessionId = data.playerSessionId;
+      // Build voter list from server players; mark local player with isPlayer flag
+      this.voters = data.players.map(p => ({
+        id: p.sessionId,
+        name: p.name,
+        color: p.color,
+        isPlayer: p.sessionId === data.playerSessionId,
+      }));
+    } else {
+      this.isMultiplayer = false;
+      this.playerSessionId = '';
+      // Freeplay: player id '_player', bot ids 'bot_N'
+      this.voters = [
+        ...(data.playerAlive
+          ? [{ id: '_player', name: data.playerName, color: data.playerColor, isPlayer: true }]
+          : []),
+        ...data.aliveBots.map(b => ({
+          id: `bot_${b.id}`,
+          name: b.name,
+          color: b.color,
+          isPlayer: false,
+        })),
+      ];
+    }
   }
 
   create() {
     const { width: W, height: H } = this.scale;
 
-    // Dark overlay
     this.add.rectangle(W / 2, H / 2, W, H, 0x000000, 0.95);
 
-    // Header
     this.add.text(W / 2, 28, '🚨  EMERGENCY MEETING  🚨', {
       fontSize: '28px', color: '#ff4444', fontFamily: 'Arial', fontStyle: 'bold',
     }).setOrigin(0.5, 0);
@@ -58,15 +106,12 @@ export class MeetingScene extends Phaser.Scene {
       fontSize: '20px', color: '#aaaaaa', fontFamily: 'Arial',
     }).setOrigin(0.5, 0);
 
-    // Timer
     this.timerText = this.add.text(W - 20, 28, `${this.discussTime}s`, {
       fontSize: '26px', color: '#ffff00', fontFamily: 'Arial', fontStyle: 'bold',
     }).setOrigin(1, 0);
 
-    // Voter list — single column for portrait
     this.buildVoterList();
 
-    // Skip button — only for living players; dead players are spectators
     if (this.playerAlive) {
       const skipBtn = this.add.text(W / 2, H - 30, '⏭  Skip Vote', {
         fontSize: '24px', color: '#aaaaaa', backgroundColor: '#333',
@@ -81,13 +126,25 @@ export class MeetingScene extends Phaser.Scene {
     }
 
     this.time.addEvent({ delay: 1000, callback: this.tick, callbackScope: this, loop: true });
+
+    // In multiplayer, wait for the server's VOTE_RESULT instead of tallying locally
+    if (this.isMultiplayer) {
+      NetworkManager.room?.onMessage('VOTE_RESULT', (msg: {
+        ejectedId: string | null;
+        votes: Record<string, string | 'skip'>;
+      }) => {
+        if (this.phase === 'result') return;
+        this.phase = 'result';
+        this.showResultAndClose(msg.ejectedId);
+      });
+    }
   }
 
   private buildVoterList() {
     const { width: W } = this.scale;
     const startY = 108;
-    const rowH = 72;                   // taller rows — easy touch targets
-    const rowW = W - 32;               // single column, full-width minus margins
+    const rowH = 72;
+    const rowW = W - 32;
 
     this.voteButtons = [];
 
@@ -100,27 +157,21 @@ export class MeetingScene extends Phaser.Scene {
     this.voters.forEach((v, i) => {
       const x = 16;
       const y = startY + i * rowH;
-
       const container = this.add.container(x, y);
 
-      // Row background
       const bg = this.add.rectangle(0, 0, rowW, rowH - 6, 0x222222).setOrigin(0, 0);
       bg.setInteractive(new Phaser.Geom.Rectangle(0, 0, rowW, rowH - 6), Phaser.Geom.Rectangle.Contains);
 
-      // Color swatch
       const swatch = this.add.rectangle(12, (rowH - 6) / 2 - 18, 36, 36, colorMap[v.color] ?? 0x666666).setOrigin(0, 0);
 
-      // Name — larger font
       const nameTxt = this.add.text(60, 12, v.isPlayer ? `★ ${v.name}` : v.name, {
         fontSize: '22px', color: '#ffffff', fontFamily: 'Arial', fontStyle: v.isPlayer ? 'bold' : 'normal',
       }).setOrigin(0, 0);
 
-      // Sub-label (You / Bot)
       const subTxt = this.add.text(60, 38, v.isPlayer ? 'You' : 'Crewmate', {
         fontSize: '14px', color: '#888888', fontFamily: 'Arial',
       }).setOrigin(0, 0);
 
-      // Voted indicator
       const votedTxt = this.add.text(rowW - 12, 12, '', {
         fontSize: '18px', color: '#ffff00', fontFamily: 'Arial',
       }).setOrigin(1, 0);
@@ -159,40 +210,53 @@ export class MeetingScene extends Phaser.Scene {
       this.phase = 'vote';
       this.openVoting();
     } else if (this.phase === 'vote' && this.elapsed >= this.discussTime + this.votingTime) {
-      this.tallyVotes();
+      // Multiplayer: server decides the result; client timer is just cosmetic.
+      // Freeplay: tally locally when time runs out.
+      if (!this.isMultiplayer) this.tallyVotes();
     }
   }
 
   private openVoting() {
     const { width: W } = this.scale;
-    // Replace "Discussion…" label with vote prompt
     this.add.text(W / 2, 70, 'Vote now!', {
       fontSize: '20px', color: '#ffcc00', fontFamily: 'Arial', fontStyle: 'bold',
     }).setOrigin(0.5, 0);
 
-    // Simulate bot votes
-    this.time.delayedCall(Phaser.Math.Between(3000, 10000), () => {
-      for (const v of this.voters) {
-        if (!v.isPlayer && !this.votes.has(v.id)) {
-          const candidates = this.voters.filter(x => x.id !== v.id);
-          const pick = Phaser.Math.RND.pick(candidates);
-          this.votes.set(v.id, pick?.id ?? 'skip');
+    // Freeplay only: simulate bot votes after a random delay
+    if (!this.isMultiplayer) {
+      this.time.delayedCall(Phaser.Math.Between(3000, 10000), () => {
+        for (const v of this.voters) {
+          if (!v.isPlayer && !this.votes.has(v.id)) {
+            const candidates = this.voters.filter(x => x.id !== v.id);
+            const pick = Phaser.Math.RND.pick(candidates);
+            this.votes.set(v.id, pick?.id ?? 'skip');
+          }
         }
-      }
-    });
+      });
+    }
   }
 
-  private castVote(target: number | 'skip') {
+  private castVote(targetId: string | 'skip') {
     if (!this.playerAlive || this.votedFor !== null || this.phase !== 'vote') return;
-    this.votedFor = target;
-    this.votes.set(-1, target);
+    this.votedFor = targetId;
+
+    if (this.isMultiplayer) {
+      // Server resolves the vote; we just broadcast our choice
+      NetworkManager.room?.send('VOTE', { targetId });
+    } else {
+      this.votes.set('_player', targetId);
+    }
 
     const { width: W } = this.scale;
-    const msg = target === 'skip' ? 'Skipped!' : `Voted for ${this.voters.find(v => v.id === target)?.name ?? '?'}`;
-    this.add.text(W / 2, 70, `✓ ${msg}`, {
+    const targetName = targetId === 'skip'
+      ? 'Skipped!'
+      : this.voters.find(v => v.id === targetId)?.name ?? '?';
+    this.add.text(W / 2, 70, `✓ ${targetId === 'skip' ? 'Skipped!' : `Voted for ${targetName}`}`, {
       fontSize: '18px', color: '#00ff88', fontFamily: 'Arial', fontStyle: 'bold',
     }).setOrigin(0.5, 0);
   }
+
+  // ── Freeplay tally (server handles this in multiplayer) ────────────────────
 
   private tallyVotes() {
     if (this.phase === 'result') return;
@@ -204,23 +268,29 @@ export class MeetingScene extends Phaser.Scene {
       }
     }
 
-    const tally = new Map<number | 'skip', number>();
+    const tally = new Map<string, number>();
     for (const target of this.votes.values()) {
       tally.set(target, (tally.get(target) ?? 0) + 1);
     }
 
     let maxVotes = 0;
-    let ejected: number | 'skip' = 'skip';
+    let ejected: string | 'skip' = 'skip';
     let tied = false;
     for (const [k, cnt] of tally) {
       if (cnt > maxVotes) { maxVotes = cnt; ejected = k; tied = false; }
       else if (cnt === maxVotes && k !== 'skip') { tied = true; }
     }
-    // Ties result in no ejection, matching the original Among Us behaviour
     if (tied) ejected = 'skip';
 
+    this.showResultAndClose(ejected === 'skip' ? null : ejected);
+  }
+
+  // ── Shared result display ──────────────────────────────────────────────────
+
+  private showResultAndClose(ejectedId: string | null) {
     const { width: W, height: H } = this.scale;
-    const ejectedVoter = ejected !== 'skip' ? this.voters.find(v => v.id === ejected) : null;
+
+    const ejectedVoter = ejectedId ? this.voters.find(v => v.id === ejectedId) : null;
     const msg = ejectedVoter
       ? `${ejectedVoter.name} was ejected!`
       : 'No one was ejected. (Skipped)';
@@ -232,10 +302,16 @@ export class MeetingScene extends Phaser.Scene {
     }).setOrigin(0.5).setDepth(21);
 
     this.time.delayedCall(3000, () => {
-      const ejectedId = ejected === 'skip' ? null : ejected as number;
-      // resolveMeeting already calls scene.resume('GameScene') internally —
-      // the second resume here was redundant and is now removed.
-      this.gameScene.resolveMeeting(ejectedId);
+      if (this.isMultiplayer) {
+        // GameScene.resolveMeetingMultiplayer handles the ejection side-effects
+        this.gameScene.resolveMeetingMultiplayer(ejectedId);
+      } else {
+        // Convert string id back to the number GameScene.resolveMeeting expects
+        let numId: number | null = null;
+        if (ejectedId === '_player') numId = -1;
+        else if (ejectedId?.startsWith('bot_')) numId = parseInt(ejectedId.replace('bot_', ''), 10);
+        this.gameScene.resolveMeeting(numId);
+      }
       this.scene.stop('MeetingScene');
     });
   }

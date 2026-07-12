@@ -181,9 +181,40 @@ Browser loads index.html
 - Together these four changes replicate the original Among Us navigation loop end-to-end: task list → map markers → arrow guidance → walk in and press Use.
 - TypeScript check: clean (`tsc --noEmit` passes) after every change in this session; workflow restarted and screenshot-verified (compass rotation, minimap markers, task list highlight all visually confirmed).
 
+### Session 9 (2026-07-12) — Multiplayer Phase 3: Full Game Events (client-side wiring)
+**What was done:** The server (`AmongGasRoom.ts`) already had complete Phase 3 handlers. This session wired all the missing client-side responses.
+
+**GameScene.ts additions:**
+- `player.isImpostor` now set from registry (`isImpostor` key written by LobbyScene on `YOU_ARE_IMPOSTOR` message) at `create()` time in multiplayer mode.
+- `initMultiplayer()` extended with `room.onMessage` handlers for all Phase 3 server broadcasts:
+  - `KILL_CONFIRMED` → kills local player or marks remote player dead + places dead-body sprite
+  - `MEETING_STARTED` → plays alert sound/overlay on all clients, then calls `launchMeetingMultiplayer()` after 2.5 s
+  - `GAME_OVER` → calls `endGameMultiplayer()` → VictoryScene
+  - `POSITION_CORRECTION` → snaps local player to server-corrected position
+- `completeTask()` — now also sends `TASK_DONE` to server in multiplayer (server validates proximity + increments its count).
+- `triggerEmergency(isReport)` — in multiplayer, sends `EMERGENCY` or `REPORT` to server and returns immediately (server broadcasts `MEETING_STARTED` to all clients; no local launch).
+- `tryReport()` — in multiplayer, delegates to `triggerEmergency(true)` (which finds nearest dead remote player).
+- `detectNearby()` — in multiplayer: report button shows when near a dead remote player; kill button shows when `player.isImpostor` and a living remote player is within `KILL_RADIUS`.
+- `attemptKill()` — in multiplayer: finds nearest alive remote player, sends `KILL` message to server, resets `killCooldown`.
+- New private methods: `launchMeetingMultiplayer()`, `resolveMeetingMultiplayer(sessionId)`, `endGameMultiplayer(winner, impostorId)`.
+
+**MeetingScene.ts rewrite:**
+- Now accepts two init shapes: `FreeMeetingData` (existing freeplay — unchanged behaviour) and `MultiMeetingData` (multiplayer — server player list + sessionIds).
+- Voter ids unified as `string` (`'_player'` / `'bot_N'` for freeplay; raw `sessionId` for multiplayer).
+- In multiplayer: `castVote()` sends `room.send('VOTE', { targetId })` instead of recording locally. `openVoting()` does **not** simulate bot votes. Local timer is cosmetic only — `tallyVotes()` is never called.
+- `create()` subscribes to `VOTE_RESULT` in multiplayer mode; on receipt calls shared `showResultAndClose()`.
+- `showResultAndClose()` is now shared: calls `gameScene.resolveMeetingMultiplayer(id)` in multiplayer or converts string id back to `number` and calls `gameScene.resolveMeeting(id)` in freeplay.
+- `tsc --noEmit` passes cleanly.
+
+**Multiplayer phase summary (as of this session):**
+- ✅ Phase 1 — Infrastructure (Colyseus server, room codes, Telegram auth bypass in dev)
+- ✅ Phase 2 — Position sync (RemotePlayer sprites, 10 Hz MOVE, interpolation)
+- ✅ Phase 3 — Full game events (kills, tasks, meetings, votes, win/loss — fully server-driven)
+- ❌ Phase 4 — Telegram deep-link invite (BotFather /play command → auto-join) — NOT STARTED
+
 ### Next Session Priorities
-1. Consider lazy-loading ambient sounds per room (31 MB currently omitted)
-2. Wire up Telegram user identity (pre-fill player name from `initDataUnsafe.user.first_name`)
-3. Test multiplayer (LOCAL) path
-4. Fix red player visor rendering green (see §5)
-5. Extend `TASK_SPRITE_VARIANTS` highlight/connected treatment to other task objects if more art becomes available (currently only wifi + electricity_wires have both variants; nav has highlight only)
+1. **Test Phase 3 end-to-end** — open two browser tabs, join same room via LOCAL → Create/Join, play a full game: move, kill, report, meeting vote, win/loss all need to fire correctly across tabs.
+2. **Fix red player visor rendering green** (see §5 — cosmetic, low priority)
+3. **Phase 4: Telegram deep-link invite** — BotFather `/play` command → bot creates room → inline button with `startapp=ROOM_CODE` → client auto-joins via `initDataUnsafe.start_param`
+4. **Wire Telegram user identity** — pre-fill player name from `Telegram.WebApp.initDataUnsafe.user.first_name` in MenuScene character select
+5. Consider lazy-loading ambient sounds per room (31 MB currently omitted)

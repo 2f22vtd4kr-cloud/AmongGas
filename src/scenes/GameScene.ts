@@ -253,7 +253,10 @@ export class GameScene extends Phaser.Scene {
     }
 
     // ── Multiplayer: render other connected players from server state ──
-    if (this.isMultiplayer) this.initMultiplayer();
+    if (this.isMultiplayer) {
+      this.player.isImpostor = this.registry.get('isImpostor') === true;
+      this.initMultiplayer();
+    }
 
     // ── World bounds ──
     this.physics.world.setBounds(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
@@ -902,6 +905,119 @@ export class GameScene extends Phaser.Scene {
       this.remotePlayers.get(sessionId)?.destroy();
       this.remotePlayers.delete(sessionId);
     });
+
+    // ── Phase 3: Game event handlers ───────────────────────────────────────
+    room.onMessage('KILL_CONFIRMED', (msg: { killerId: string; victimId: string }) => {
+      if (msg.victimId === room.sessionId) {
+        this.killPlayer();
+      } else {
+        const rp = this.remotePlayers.get(msg.victimId);
+        if (rp) {
+          this.add.image(rp.x, rp.y, `dead_${rp.playerColor.toLowerCase()}`).setDepth(3);
+          rp.setAlive(false);
+        }
+      }
+      this.sound.play('sfx_kill', { volume: 0.6 });
+      if (msg.victimId !== room.sessionId) {
+        this.sound.play('sfx_kill_victim', { volume: 0.55 });
+      }
+    });
+
+    room.onMessage('MEETING_STARTED', (msg: { callerId: string; reason: 'emergency' | 'report' }) => {
+      if (this.gameOver) return;
+      this.emergencyCooldown = 45_000;
+      this.meetings++;
+      const isReport = msg.reason === 'report';
+      const color = (this.registry.get('playerColor') as string ?? 'Red').toLowerCase();
+      const imgKey = isReport ? `alert_report_${color}` : `alert_meeting_${color}`;
+      this.sound.play(isReport ? 'sfx_report' : 'sfx_emergency', { volume: 0.9 });
+
+      const { width: W, height: H } = this.scale;
+      const overlay = this.add.rectangle(W / 2, H / 2, W, H, 0x000000, 0.7).setScrollFactor(0).setDepth(200);
+      const alertImg = this.textures.exists(imgKey)
+        ? fitContain(this.add.image(W / 2, H / 2, imgKey).setScrollFactor(0).setDepth(201), W * 0.8, H * 0.5)
+        : this.add.text(W / 2, H / 2, isReport ? '💀 Body Reported!' : '🚨 Emergency Meeting!', {
+            fontSize: '40px', color: '#ff2222', fontFamily: 'Arial',
+          }).setOrigin(0.5).setScrollFactor(0).setDepth(201);
+      this.cameras.main.ignore([overlay, alertImg]);
+
+      this.time.delayedCall(2500, () => {
+        overlay.destroy();
+        if ('destroy' in alertImg) (alertImg as Phaser.GameObjects.GameObject).destroy();
+        this.launchMeetingMultiplayer();
+      });
+    });
+
+    room.onMessage('GAME_OVER', (msg: { winner: 'crew' | 'impostor'; impostorId: string }) => {
+      this.endGameMultiplayer(msg.winner, msg.impostorId);
+    });
+
+    room.onMessage('POSITION_CORRECTION', (msg: { x: number; y: number }) => {
+      this.player.setPosition(msg.x, msg.y);
+    });
+  }
+
+  private launchMeetingMultiplayer() {
+    const room = NetworkManager.room;
+    if (!room) return;
+    type PS = { name: string; color: string; isAlive: boolean };
+    const players: { sessionId: string; name: string; color: string }[] = [];
+    (room.state.players as unknown as Map<string, PS>).forEach((p, sid) => {
+      if (p.isAlive) players.push({ sessionId: sid, name: p.name, color: p.color });
+    });
+    this.scene.pause();
+    this.scene.launch('MeetingScene', {
+      mode: 'multiplayer',
+      gameScene: this,
+      playerSessionId: room.sessionId,
+      playerName: this.registry.get('playerName') as string ?? 'Crewmate',
+      playerColor: this.registry.get('playerColor') as string ?? 'Red',
+      playerAlive: this.player.isAlive,
+      players,
+    });
+  }
+
+  public resolveMeetingMultiplayer(ejectedSessionId: string | null) {
+    this.scene.resume('GameScene');
+    if (!ejectedSessionId) return;
+
+    const { width: W, height: H } = this.scale;
+    const room = NetworkManager.room;
+
+    if (ejectedSessionId === room?.sessionId) {
+      this.killPlayer();
+      const name = this.registry.get('playerName') ?? 'You';
+      const t = this.add.text(W / 2, H / 2, `${name as string} was ejected!`, {
+        fontSize: '32px', color: '#ffffff',
+        backgroundColor: '#00000099', padding: { x: 20, y: 12 }, fontFamily: 'Arial',
+      }).setOrigin(0.5).setScrollFactor(0).setDepth(200);
+      this.cameras.main.ignore(t);
+      this.time.delayedCall(3000, () => t.destroy());
+    } else {
+      const rp = this.remotePlayers.get(ejectedSessionId);
+      if (rp) {
+        this.add.image(rp.x, rp.y, `dead_${rp.playerColor.toLowerCase()}`).setDepth(3);
+        rp.setAlive(false);
+      }
+    }
+  }
+
+  private endGameMultiplayer(winner: 'crew' | 'impostor', impostorId: string) {
+    if (this.gameOver) return;
+    this.gameOver = true;
+
+    const sfx = winner === 'crew' ? 'sfx_victory_crew' : 'sfx_victory_imp';
+    this.sound.play(sfx, { volume: 0.9 });
+
+    const room = NetworkManager.room;
+    type PS = { name: string };
+    const impostorName = impostorId === room?.sessionId
+      ? (this.registry.get('playerName') as string ?? 'You')
+      : ((room?.state.players as unknown as Map<string, PS> | undefined)?.get(impostorId)?.name ?? '???');
+
+    this.time.delayedCall(2000, () => {
+      this.scene.start('VictoryScene', { winner, tasksDone: this.tasksDone, impostorName });
+    });
   }
 
   /** Dead-reckons every remote player toward its latest server position. */
@@ -988,7 +1104,34 @@ export class GameScene extends Phaser.Scene {
     // Contextual action buttons — only show the ones that are actionable
     // right now, so the bottom-right thumb zone doesn't clutter the screen.
     this.useBtn.setVisible(!!this.nearbyTask || nearEmergency);
-    this.reportBtn.setVisible(!!this.nearbyCorpse);
+
+    if (this.isMultiplayer) {
+      // In multiplayer: report shows when near a dead remote player's body
+      let nearDeadRemote = false;
+      for (const rp of this.remotePlayers.values()) {
+        if (rp.isAlive) continue;
+        if (Phaser.Math.Distance.Between(px, py, rp.x, rp.y) < REPORT_RADIUS) {
+          nearDeadRemote = true;
+          break;
+        }
+      }
+      this.reportBtn.setVisible(nearDeadRemote);
+
+      // Kill button: only for the impostor, when a living remote player is in range
+      if (this.player.isImpostor && this.player.isAlive) {
+        let nearAliveRemote = false;
+        for (const rp of this.remotePlayers.values()) {
+          if (!rp.isAlive) continue;
+          if (Phaser.Math.Distance.Between(px, py, rp.x, rp.y) < KILL_RADIUS) {
+            nearAliveRemote = true;
+            break;
+          }
+        }
+        this.killBtn.setVisible(nearAliveRemote && this.killCooldown <= 0);
+      }
+    } else {
+      this.reportBtn.setVisible(!!this.nearbyCorpse);
+    }
   }
 
   private tryInteract() {
@@ -1008,6 +1151,10 @@ export class GameScene extends Phaser.Scene {
 
   private tryReport() {
     if (!this.player.isAlive || this.gameOver) return;
+    if (this.isMultiplayer) {
+      this.triggerEmergency(true); // finds nearest dead remote player internally
+      return;
+    }
     if (this.nearbyCorpse) this.triggerEmergency(true);
   }
 
@@ -1039,12 +1186,13 @@ export class GameScene extends Phaser.Scene {
       this.sound.play('sfx_task_done', { volume: 0.8 });
       this.updateTaskBar();
       this.updateTaskList();
-      // Immediately flip the world sprite to its "connected" state
       const sprite = this.taskSprites.get(t.objectName);
       const variants = TASK_SPRITE_VARIANTS[t.objectName];
       if (sprite && variants?.connected && this.textures.exists(variants.connected)) {
         sprite.setTexture(variants.connected);
       }
+      // Inform server in multiplayer — server validates proximity and updates its count
+      if (this.isMultiplayer) NetworkManager.room?.send('TASK_DONE', { taskId });
     }
     this.scene.resume('GameScene');
     // Check win immediately — previously missing, so a crew task-completion
@@ -1090,6 +1238,27 @@ export class GameScene extends Phaser.Scene {
 
   private triggerEmergency(isReport: boolean) {
     if (this.gameOver || this.emergencyCooldown > 0) return;
+
+    // In multiplayer the server drives the meeting — send the action and wait
+    // for the MEETING_STARTED broadcast (which fires for all clients, including
+    // the caller, so the meeting launches uniformly everywhere).
+    if (this.isMultiplayer) {
+      if (isReport) {
+        // Find nearest dead remote player and report their corpse
+        for (const [sid, rp] of this.remotePlayers.entries()) {
+          if (rp.isAlive) continue;
+          const d = Phaser.Math.Distance.Between(this.player.x, this.player.y, rp.x, rp.y);
+          if (d < REPORT_RADIUS) {
+            NetworkManager.room?.send('REPORT', { corpseId: sid });
+            return;
+          }
+        }
+      } else {
+        NetworkManager.room?.send('EMERGENCY', {});
+      }
+      return;
+    }
+
     this.emergencyCooldown = 45000;
     this.meetings++;
 
@@ -1295,7 +1464,22 @@ export class GameScene extends Phaser.Scene {
 
   private attemptKill() {
     if (this.killCooldown > 0 || !this.player.isAlive || this.gameOver) return;
-    // Player impostor mode (not used in Freeplay, future feature)
+    if (!this.isMultiplayer || !this.player.isImpostor) return;
+
+    // Find nearest alive remote player within kill radius
+    let nearestSid = '';
+    let nearestDist = KILL_RADIUS;
+    for (const [sid, rp] of this.remotePlayers.entries()) {
+      if (!rp.isAlive) continue;
+      const d = Phaser.Math.Distance.Between(this.player.x, this.player.y, rp.x, rp.y);
+      if (d < nearestDist) { nearestDist = d; nearestSid = sid; }
+    }
+    if (!nearestSid) return;
+
+    NetworkManager.room?.send('KILL', { targetId: nearestSid });
+    this.killCooldown = 15_000;
+    this.sound.play('sfx_kill', { volume: 0.6 });
+    this.killBtn.setVisible(false);
   }
 
   // ────────────────── Win Conditions ──────────────────
