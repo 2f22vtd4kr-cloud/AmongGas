@@ -89,8 +89,21 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
 
     this.setVelocity(vx, vy);
 
-    // Ghost: skip walk animations and footsteps (ghost floats silently)
+    // Ghost: bob between the two ghost frames while moving; no footsteps
     if (this.isGhost) {
+      const ghostMoving = vx !== 0 || vy !== 0;
+      if (ghostMoving) {
+        // Toggle every 200 ms using wall-clock time
+        const ghostFrame = Math.floor(Date.now() / 200) % 2 === 0
+          ? `${this.colorKey}_ghost_1`
+          : `${this.colorKey}_ghost_2`;
+        if (this.texture.key !== ghostFrame) this.setTexture(ghostFrame);
+      } else {
+        // Idle: rest on frame 1
+        if (this.texture.key !== `${this.colorKey}_ghost_1`) {
+          this.setTexture(`${this.colorKey}_ghost_1`);
+        }
+      }
       this.nameLabel.setPosition(this.x, this.y - 55);
       return;
     }

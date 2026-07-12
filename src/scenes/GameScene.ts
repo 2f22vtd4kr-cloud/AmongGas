@@ -763,7 +763,13 @@ export class GameScene extends Phaser.Scene {
     if (this.gameOver) return;
 
     // Cooldowns
-    if (this.killCooldown > 0) this.killCooldown -= delta;
+    if (this.killCooldown > 0) {
+      this.killCooldown -= delta;
+      // Ping the player when their kill is ready again
+      if (this.killCooldown <= 0 && this.player.isImpostor) {
+        this.sound.play('sfx_kill_cooldown', { volume: 0.7 });
+      }
+    }
     if (this.emergencyCooldown > 0) this.emergencyCooldown -= delta;
 
     // Player
@@ -1057,8 +1063,25 @@ export class GameScene extends Phaser.Scene {
       this.playerWallCollider?.destroy();
     }
 
+    // Victim scream
+    this.sound.play('sfx_kill_victim', { volume: 0.55 });
+
     // Overlay the kill cinematic (non-blocking — game logic already updated above)
     this.showKillAnimation();
+  }
+
+  /**
+   * Plays the 3-frame kill_anim sprite at the bot's death position in world
+   * space. Visible on the main camera so it tracks with the map. Auto-destroys.
+   */
+  private showBotKillAnimation(x: number, y: number) {
+    if (!this.anims.exists('kill_anim')) return;
+    const sprite = this.add.sprite(x, y, 'kill_anim_1')
+      .setDepth(20)
+      .setOrigin(0.5)
+      .setScale(1.4);
+    sprite.play('kill_anim');
+    sprite.once(Phaser.Animations.Events.ANIMATION_COMPLETE, () => sprite.destroy());
   }
 
   /**
@@ -1132,8 +1155,12 @@ export class GameScene extends Phaser.Scene {
     }
 
     if (target && minDist < 300) {
+      const killX = target.x;
+      const killY = target.y;
       target.die();
       this.sound.play('sfx_kill', { volume: 0.6 });
+      this.sound.play('sfx_kill_victim', { volume: 0.55 });
+      this.showBotKillAnimation(killX, killY);
       // Check win after bot kill — previously missing, so impostor wiping all
       // crew bots wasn't detected until the player also died or a meeting fired.
       this.checkWinConditions();
