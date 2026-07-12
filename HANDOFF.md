@@ -93,13 +93,50 @@ Browser loads index.html
 
 ## 7. End-to-End Flow Status
 
+### Freeplay
 - ✅ Menu loads without purple screen
 - ✅ FREEPLAY → `GamePreloadScene` → `GameScene`
 - ✅ Task mini-games open, complete, and return to `GameScene` (resume-before-stop fixed in all scenes)
 - ✅ Emergency meeting → `MeetingScene` → vote → `resolveMeeting()` → `checkWinConditions()`
 - ✅ Win/loss → `VictoryScene` → back to `MenuScene` (loop)
 - ⚠️ Victory sounds 404 silently (files missing — see §5)
-- ⚠️ Dead sprites show wrong texture (see §5 / Task #3)
+
+### Multiplayer (Colyseus)
+- ✅ Phase 1 — Infrastructure (server, room codes, Telegram auth bypass in dev)
+- ✅ Phase 2 — Position sync (`RemotePlayer` sprites, 10 Hz MOVE, interpolation)
+- ✅ Phase 3 — Full game events (kills, tasks, meetings, votes, win/loss — server-driven)
+- ❌ Phase 4 — Telegram deep-link invite — **START HERE next session**
+
+### ▶ Next session START HERE — Phase 4: Telegram Deep-Link Invite
+
+**Goal:** Tapping a Telegram invite link auto-opens the Mini App and joins the right room.
+
+**How Telegram deep links work:**
+- BotFather sets a `/play` command that opens the Mini App with `?startapp=ROOM_CODE`
+- Inside the Mini App: `window.Telegram.WebApp.initDataUnsafe.start_param` holds `ROOM_CODE`
+- `LobbyScene.ts` reads `start_param` on boot → if present, auto-joins that room (skip the "Join" UI)
+- The Share button in `LobbyScene.ts` already builds a `t.me/BOT_NAME?startapp=ROOM_CODE` URL
+
+**Files to touch:**
+| File | Change |
+|------|--------|
+| `src/scenes/LobbyScene.ts` | On `create()`: read `start_param`; if set, call `autoJoin(code)` skipping the manual Join flow |
+| `src/scenes/LobbyScene.ts` | `autoJoin(code)` — same logic as pressing Join but with code pre-filled; show "Joining…" spinner |
+| `src/scenes/MenuScene.ts` | On Online button click: read `start_param`; if set, skip character-select and go directly to LobbyScene with `{autoJoin: code}` |
+| `server/index.ts` (optional) | Nothing required server-side — room code join already works |
+
+**Colyseus join in LobbyScene (existing pattern to reuse):**
+```typescript
+const room = await client.joinByRoomId(code); // or joinById depending on Colyseus version
+// Colyseus 0.17 uses: client.joinOrCreate / client.join with the 6-char room code as roomId
+```
+
+**Environment variable needed:**
+- `BOT_USERNAME` — set in Replit Secrets; used to build the `t.me/BOT_USERNAME?startapp=CODE` share URL (LobbyScene already has a placeholder)
+
+**Testing without a real bot:**
+- Manually append `#startapp=XXXXXX` or pass initData override via Telegram DevTools
+- Or: just test the auto-join code path by passing `{autoJoin: 'XXXXXX'}` from MenuScene directly
 
 ---
 

@@ -171,9 +171,13 @@ this.onMessage('move', (client, data) => {
 });
 ```
 
-### Phase 3 — Full game events (NOT STARTED)
+### Phase 3 — Full game events ✅ COMPLETE
 - Kills, task completion, emergency meeting, votes, win/loss all routed through Colyseus
-- Replace local Bot AI with server-authoritative impostor logic
+- `MeetingScene.ts` rewritten to handle both freeplay and multiplayer init shapes
+- Client listens for: `KILL_CONFIRMED`, `MEETING_STARTED`, `VOTE_RESULT`, `GAME_OVER`, `POSITION_CORRECTION`
+- Client sends: `KILL`, `REPORT`, `EMERGENCY`, `TASK_DONE`, `VOTE`
 
-### Phase 4 — Telegram deep-link invite (NOT STARTED)
-- BotFather `/play` command → deep link encodes room code → LobbyScene auto-joins
+### Phase 4 — Telegram deep-link invite (NOT STARTED — implement next)
+- BotFather `/play` command → `?startapp=ROOM_CODE` → `LobbyScene` reads `initDataUnsafe.start_param` → auto-joins
+- `BOT_USERNAME` Replit Secret needed for Share URL
+- See `HANDOFF.md §7` for full implementation plan
