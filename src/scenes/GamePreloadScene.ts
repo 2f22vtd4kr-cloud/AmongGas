@@ -298,13 +298,22 @@ export class GamePreloadScene extends Phaser.Scene {
       }
     }
 
-    // ── Kill animation ────────────────────────────────────────────
+    // ── Kill animation (3-frame sprite walk) ─────────────────────
     const killFrames = [1, 2, 3]
       .map(i => `kill_anim_${i}`)
       .filter(k => this.textures.exists(k))
       .map(key => ({ key }));
     if (killFrames.length > 0) {
       try { this.anims.create({ key: 'kill_anim', frames: killFrames, frameRate: 8, repeat: 0 }); }
+      catch (_) {}
+    }
+
+    // ── Kill banner cinematic (18-frame screen overlay) ───────────
+    const bannerFrames = Array.from({ length: 18 }, (_, i) => `kill_banner_${i + 1}`)
+      .filter(k => this.textures.exists(k))
+      .map(key => ({ key }));
+    if (bannerFrames.length > 0) {
+      try { this.anims.create({ key: 'kill_banner', frames: bannerFrames, frameRate: 12, repeat: 0 }); }
       catch (_) {}
     }
 

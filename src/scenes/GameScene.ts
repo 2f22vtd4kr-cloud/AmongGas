@@ -1039,8 +1039,8 @@ export class GameScene extends Phaser.Scene {
   /**
    * Kills the local player: places a dead-body sprite at the current position,
    * transitions the player sprite to ghost mode (semi-transparent, can still
-   * walk through walls), and removes the player-wall collider so the ghost
-   * passes through the map geometry.
+   * walk through walls), removes the player-wall collider, and plays the
+   * 18-frame kill-banner cinematic as a non-blocking screen overlay.
    */
   private killPlayer() {
     if (!this.player.isAlive) return;
@@ -1055,6 +1055,51 @@ export class GameScene extends Phaser.Scene {
     // Ghost mode: remove wall collision so the ghost walks through walls
     if (this.player.isGhost) {
       this.playerWallCollider?.destroy();
+    }
+
+    // Overlay the kill cinematic (non-blocking — game logic already updated above)
+    this.showKillAnimation();
+  }
+
+  /**
+   * Plays the 18-frame kill-banner animation as a full-width cinematic overlay
+   * rendered only on the UI camera (same pattern as showAlert). Auto-destroys
+   * when the animation completes.
+   */
+  private showKillAnimation() {
+    if (!this.textures.exists('kill_banner_1')) return;
+
+    const { width: W, height: H } = this.scale;
+
+    // Dark backing so the landscape strip doesn't float on a transparent void
+    const bg = this.add.rectangle(W / 2, H / 2, W, H, 0x000000, 0.75)
+      .setScrollFactor(0)
+      .setDepth(249)
+      .setOrigin(0.5);
+    this.cameras.main.ignore(bg);
+
+    const sprite = this.add.sprite(W / 2, H / 2, 'kill_banner_1')
+      .setScrollFactor(0)
+      .setDepth(250)
+      .setOrigin(0.5);
+
+    // Scale so the image fills the screen width
+    const src = this.textures.get('kill_banner_1').getSourceImage() as HTMLImageElement;
+    if (src.width > 0) {
+      sprite.setScale(W / src.width);
+    }
+
+    this.cameras.main.ignore(sprite);
+
+    if (this.anims.exists('kill_banner')) {
+      sprite.play('kill_banner');
+      sprite.once(Phaser.Animations.Events.ANIMATION_COMPLETE, () => {
+        sprite.destroy();
+        bg.destroy();
+      });
+    } else {
+      // Fallback: no animation defined — show first frame briefly
+      this.time.delayedCall(700, () => { sprite.destroy(); bg.destroy(); });
     }
   }
 
