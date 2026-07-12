@@ -310,13 +310,21 @@ export class AmongGasRoom extends Room {
 
   private checkWinConditions() {
     if (this.state.phase === 'RESULT') return;
-    const alive     = [...this.state.players.values()].filter(p => p.isAlive);
-    const aliveCrew = alive.filter(p => p.id !== this.impostorSid);
-    const aliveImps = alive.filter(p => p.id === this.impostorSid);
+
+    // IMPORTANT: players map is keyed by sessionId, not p.id.
+    // p.id is the Telegram userId (or "dev_<sessionId>" in dev).
+    // impostorSid is the raw sessionId — always compare by map key.
+    let aliveCrewCount = 0;
+    let impostorAlive  = false;
+    this.state.players.forEach((p, sid) => {
+      if (!p.isAlive) return;
+      if (sid === this.impostorSid) impostorAlive = true;
+      else aliveCrewCount++;
+    });
 
     if (this.state.tasksDone >= NO_OF_MISSIONS) return this.endGame('crew');
-    if (aliveImps.length === 0)                 return this.endGame('crew');
-    if (aliveImps.length >= aliveCrew.length)   return this.endGame('impostor');
+    if (!impostorAlive)                          return this.endGame('crew');
+    if (1 >= aliveCrewCount)                     return this.endGame('impostor');
   }
 
   private endGame(winner: 'crew' | 'impostor') {

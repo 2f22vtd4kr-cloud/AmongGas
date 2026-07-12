@@ -252,8 +252,28 @@ Phase 4 code is wired and TypeScript-clean. To activate it in production:
   - `shareRoom()`: hardcoded `'AmongGasBot'` replaced with `import.meta.env.VITE_BOT_USERNAME ?? 'AmongGasBot'`
 - TypeScript: clean (`tsc --noEmit` passes)
 
+### Session 11 (2026-07-12) — Bug fix + full multiplayer integration test
+**Bug fixed — `checkWinConditions` impostor comparison (`server/rooms/AmongGasRoom.ts`)**
+
+Root cause: `checkWinConditions` compared `p.id` (which is `"dev_<sessionId>"` in dev mode) against `this.impostorSid` (raw sessionId). They never matched, so `aliveImps` was always 0 → crew "won" after every single event (first task done, first kill, first vote). Fixed by iterating `players.forEach((p, sid)` and comparing the map key (`sid`) directly against `impostorSid`.
+
+**`sim/mp-test.mjs` — new multiplayer integration test (67 checks, ~98 s runtime)**
+
+Tests run against the live Colyseus server with real `@colyseus/sdk` WebSocket connections:
+
+| Test | Players | What is verified |
+|------|---------|-----------------|
+| A — Lobby join/leave | 2 | Schema size before/after disconnect |
+| B — Crew win | 4, 8, 15 | Lobby, role assignment (1 imp), all 8 tasks completed, GAME_OVER crew, phase=RESULT, tasksDone=8, no POSITION_CORRECTION during movement |
+| C — Impostor win | 4 | 2 kills, KILL_CONFIRMED on all clients, victim isAlive=false in state, GAME_OVER impostor, impostorId correct |
+| D — Meeting flow | 6 | MEETING_STARTED, phase=MEETING, all-skip vote → VOTE_RESULT ejectedId=null, phase returns to GAME, duplicate EMERGENCY rejected with EMERGENCY_USED |
+| E — Speed cheat | 2 | Instant 10 000 px jump triggers POSITION_CORRECTION, corrected x ≤ 5800 |
+
+**Key implementation note for `moveTo`:** uses a single-hop approach — calculates the minimum real-time elapsed needed for the server's `maxMove = SPEED_MAX × elapsed_s + 50` to accept the move, then waits `minElapsedMs + 2000ms` (2 s safety buffer) before sending. No step-by-step walking; no timer-jitter risk. Avoids the bug where small timer jitter (−4 ms on Linux) caused step sizes to exceed the server budget, silently rejecting MOVE messages and leaving players off-task.
+
+**All 67/67 checks pass.**
+
 ### Next Session Priorities
-1. **Test Phase 3 end-to-end** — open two browser tabs, join same room via Online → Create/Join, play a full game: move, kill, report, meeting vote, win/loss all need to fire correctly across tabs
-2. **BotFather setup** — create bot, register Mini App, set `/play` command, update `VITE_BOT_USERNAME` env var, then test Phase 4 inside real Telegram
+1. **BotFather setup** — create bot, register Mini App, set `/play` command, update `VITE_BOT_USERNAME` env var, then test Phase 4 inside real Telegram
+2. **Two-tab manual smoke test** — open two browser tabs, join same room, play a full live game to verify the client-side wiring from Session 9 (kills, meetings, VictoryScene) works visually
 3. **Fix red player visor rendering green** (see §5 — cosmetic, low priority)
-4. Consider lazy-loading ambient sounds per room (31 MB currently omitted)
