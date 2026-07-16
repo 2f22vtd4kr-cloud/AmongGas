@@ -7,7 +7,7 @@ import { NetworkManager } from '../network/NetworkManager';
 import {
   BOT_POS, ALL_COLORS, PLAYER_SPAWN, WORLD_WIDTH, WORLD_HEIGHT,
   INTERACT_RADIUS, KILL_RADIUS, REPORT_RADIUS, NO_OF_MISSIONS,
-  AMBIENT_CENTRES, TASK_TITLES, CAMERA_ZOOM,
+  AMBIENT_CENTRES, TASK_TITLES, CAMERA_ZOOM, PLAYER_SPEED,
   CREW_VISION, IMP_VISION, CREW_VISION_SABOTAGED,
   SABOTAGE_ROOM_KEY, SABOTAGE_LABELS,
   SABOTAGE_COOLDOWN_MS, CRITICAL_SABOTAGE_MS, DOORS_LOCK_MS, SABOTAGE_SAFETY_MS,
@@ -256,6 +256,19 @@ export class GameScene extends Phaser.Scene {
   // The HUD button that appears when an impostor stands near a vent.
   private ventBtn?: Phaser.GameObjects.Container;
 
+  // --- bot impostor vent AI (Freeplay only) ---
+  // 'idle'           : bot walks randomly and kills normally
+  // 'moving_to_vent' : bot is pathing toward a vent entrance
+  // 'in_vent'        : bot is hidden inside a vent
+  private botVentState: 'idle' | 'moving_to_vent' | 'in_vent' = 'idle';
+
+  /** Public accessor used by AdminTableScene to hide the bot impostor dot while it is inside a vent. */
+  get botImpostorInVent(): boolean { return this.botVentState === 'in_vent'; }
+  private botVentTargetId = -1;
+  private botVentTargetX = 0;
+  private botVentTargetY = 0;
+  private botVentCooldownUntil = 0; // ms timestamp — bot won't vent before this
+
   // --- admin table ---
   // World-space centres of admin_btn1 and admin_btn2 from the TMX.
   private adminBtnPositions: { x: number; y: number }[] = [];
@@ -338,6 +351,11 @@ export class GameScene extends Phaser.Scene {
     this.nearbyVentId = -1;
     this.nearbyAdminBtn = false;
     this.ventOverlay = undefined;
+
+    // Reset bot vent AI state
+    this.botVentState = 'idle';
+    this.botVentTargetId = -1;
+    this.botVentCooldownUntil = 0;
 
     // ── Bots ── (Freeplay only — multiplayer uses real remote players instead)
     if (!this.isMultiplayer) {
@@ -1327,6 +1345,17 @@ export class GameScene extends Phaser.Scene {
       // Bots
       for (const bot of this.bots) bot.update(delta);
 
+      // Bot vent AI — runs AFTER bot.update() so we can override the velocity
+      // that Bot.update() just set for the impostor.
+      if (this.botVentState === 'moving_to_vent') {
+        // Steer impostor toward the target vent entrance
+        this.updateBotVentMovement();
+      } else if (this.botVentState === 'in_vent') {
+        // Keep the hidden impostor frozen while it waits inside the vent
+        const imp = this.bots.find(b => b.isImpostor && b.isAlive);
+        imp?.setVelocity(0, 0);
+      }
+
       // Bot task completion — crew bots complete tasks they walk over, just like
       // the player (alive or ghost). All crewmates contribute to the shared task
       // bar in the original game; this mirrors that behaviour.
@@ -1484,6 +1513,41 @@ export class GameScene extends Phaser.Scene {
       this.sabotageEndsAt = 0;
       this.sabotageLockedTasks = [];
       this.updateSabotageBanner();
+    });
+
+    // ── Vent observer animations ────────────────────────────────────────────
+    // The server broadcasts these to every client *except* the venting player,
+    // so non-impostors who are standing near the vent can see the grate open/
+    // close — matching the original Among Us mechanic where nearby crewmates
+    // can catch an impostor in the act.
+
+    room.onMessage('PLAYER_VENT', (msg: { sessionId: string; ventId: number }) => {
+      const vd = this.ventData.find(v => v.id === msg.ventId);
+      if (vd) this.playVentAnimation(vd.x, vd.y);
+      this.sound.play('sfx_vent', { volume: 0.5 });
+    });
+
+    room.onMessage('PLAYER_TRAVEL_VENT', (msg: { sessionId: string; ventId: number }) => {
+      const vd = this.ventData.find(v => v.id === msg.ventId);
+      if (vd) this.playVentAnimation(vd.x, vd.y);
+      this.sound.play('sfx_vent', { volume: 0.4 });
+    });
+
+    room.onMessage('PLAYER_EXIT_VENT', (msg: { sessionId: string }) => {
+      // Find the vent position from the remote player's current schema position
+      const rp = this.remotePlayers.get(msg.sessionId);
+      if (rp) {
+        // The remote player's schema x/y was already snapped to the exit vent
+        // by the server, so we can find the closest vent to their position.
+        let closest: { id: number; x: number; y: number } | null = null;
+        let closestDist = Infinity;
+        for (const vd of this.ventData) {
+          const d = Phaser.Math.Distance.Between(rp.x, rp.y, vd.x, vd.y);
+          if (d < closestDist) { closestDist = d; closest = vd; }
+        }
+        if (closest) this.playVentAnimation(closest.x, closest.y);
+      }
+      this.sound.play('sfx_vent', { volume: 0.5 });
     });
   }
 
@@ -2045,6 +2109,9 @@ export class GameScene extends Phaser.Scene {
 
   private impostorAct() {
     if (this.gameOver) return;
+    // Bot is hidden inside a vent — skip kill/vent logic until it resurfaces.
+    if (this.botVentState === 'in_vent') return;
+
     const imp = this.bots.find(b => b.isImpostor && b.isAlive);
     if (!imp) return;
 
@@ -2062,7 +2129,8 @@ export class GameScene extends Phaser.Scene {
       : Infinity;
 
     if (playerDist < minDist && playerDist < 300) {
-      // Player is the closest target
+      // Kill takes priority — abort any vent approach
+      this.botVentState = 'idle';
       this.killPlayer();
       this.sound.play('sfx_kill', { volume: 0.6 });
       this.checkWinConditions();
@@ -2070,6 +2138,8 @@ export class GameScene extends Phaser.Scene {
     }
 
     if (target && minDist < 300) {
+      // Kill takes priority — abort any vent approach
+      this.botVentState = 'idle';
       const killX = target.x;
       const killY = target.y;
       target.die();
@@ -2079,7 +2149,112 @@ export class GameScene extends Phaser.Scene {
       // Check win after bot kill — previously missing, so impostor wiping all
       // crew bots wasn't detected until the player also died or a meeting fired.
       this.checkWinConditions();
+      return;
     }
+
+    // No kill target in range — occasionally use a vent to reposition.
+    // ~35% chance per AI tick (every 3s) once the cooldown has expired.
+    if (this.botVentState === 'idle' && Math.random() < 0.35) {
+      this.startBotVentAI(imp);
+    }
+  }
+
+  // ────────────────── Bot Impostor Vent AI (Freeplay) ──────────────────
+
+  /**
+   * Picks a random vent on the map and puts the impostor bot in
+   * 'moving_to_vent' state.  The update loop then overrides the bot's
+   * random walk to path it toward the chosen vent entrance.
+   *
+   * Original Among Us: the impostor bot regularly uses vents to relocate,
+   * which gives crewmates the chance to catch it "venting" — one of the
+   * core skill-building mechanics in Freeplay.
+   */
+  private startBotVentAI(imp: Bot) {
+    if (this.ventData.length === 0) return;
+    if (Date.now() < this.botVentCooldownUntil) return;
+    // Don't vent during an active sabotage — the bot should stay near the
+    // sabotage location and let the critical timer run down (mirrors the
+    // original game's impostor strategy, and avoids confusion with task #4).
+    if (this.sabotageType !== '') return;
+
+    // Pick a random vent as destination
+    const vent = this.ventData[Phaser.Math.Between(0, this.ventData.length - 1)];
+    this.botVentTargetId = vent.id;
+    this.botVentTargetX  = vent.x;
+    this.botVentTargetY  = vent.y;
+    this.botVentState    = 'moving_to_vent';
+    void imp; // used implicitly via bots array in update
+  }
+
+  /**
+   * Called every frame while the impostor bot is pathing to a vent.
+   * Overrides the bot's random-walk velocity to steer it toward the vent.
+   * When it arrives (within INTERACT_RADIUS), triggers the vent-entry sequence.
+   */
+  private updateBotVentMovement() {
+    const imp = this.bots.find(b => b.isImpostor && b.isAlive);
+    if (!imp) { this.botVentState = 'idle'; return; }
+
+    const dx   = this.botVentTargetX - imp.x;
+    const dy   = this.botVentTargetY - imp.y;
+    const dist = Math.hypot(dx, dy);
+
+    if (dist < INTERACT_RADIUS) {
+      // Arrived — enter the vent
+      this.enterBotVent(imp);
+      return;
+    }
+
+    // Override the bot's own random walk velocity (same speed bots use normally)
+    imp.setVelocity((dx / dist) * PLAYER_SPEED * 0.55, (dy / dist) * PLAYER_SPEED * 0.55);
+  }
+
+  /**
+   * Makes the bot impostor enter a vent: hides it, plays the opening
+   * animation and sound (visible to any nearby crewmate), then after a
+   * random delay teleports it to a connected vent and exits there.
+   */
+  private enterBotVent(imp: Bot) {
+    this.botVentState = 'in_vent';
+    imp.setAlpha(0);
+    imp.setVelocity(0, 0);
+
+    // Vent opening animation — plays at the entry vent in world space,
+    // giving crewmates a visual cue if they happen to be nearby.
+    this.playVentAnimation(this.botVentTargetX, this.botVentTargetY);
+    this.sound.play('sfx_vent', { volume: 0.7 });
+
+    // Decide where to exit — prefer a connected vent so the bot
+    // meaningfully relocates; fall back to the same vent if isolated.
+    const connections = VENT_NETWORK[this.botVentTargetId] ?? [];
+    const exitVentId  = connections.length > 0
+      ? connections[Phaser.Math.Between(0, connections.length - 1)]
+      : this.botVentTargetId;
+    const exitVent = this.ventData.find(v => v.id === exitVentId)
+                  ?? this.ventData.find(v => v.id === this.botVentTargetId);
+
+    // Stay inside for 1.5 – 3 s, then emerge at the exit vent.
+    const stayMs = Phaser.Math.Between(1500, 3000);
+    this.time.delayedCall(stayMs, () => {
+      if (!imp.isAlive || this.gameOver) {
+        this.botVentState = 'idle';
+        if (imp.isAlive) imp.setAlpha(1);
+        return;
+      }
+
+      // Teleport to exit vent
+      if (exitVent) {
+        imp.setPosition(exitVent.x, exitVent.y);
+        this.playVentAnimation(exitVent.x, exitVent.y);
+      }
+      this.sound.play('sfx_vent', { volume: 0.7 });
+      imp.setAlpha(1);
+
+      this.botVentState = 'idle';
+      // Cooldown of 8 – 15 s before the bot vents again
+      this.botVentCooldownUntil = Date.now() + Phaser.Math.Between(8000, 15000);
+    });
   }
 
   /**
@@ -2195,6 +2370,12 @@ export class GameScene extends Phaser.Scene {
     this.isInVent = true;
     this.currentVentId = this.nearbyVentId;
 
+    // Show opening animation at the vent's world position (visible to nearby
+    // crewmates — matching original Among Us behaviour where bystanders can
+    // catch an impostor venting).
+    const vd = this.ventData.find(v => v.id === this.currentVentId);
+    if (vd) this.playVentAnimation(vd.x, vd.y);
+
     // Hide player sprite; physics body stays enabled so collision state is
     // consistent, but velocity is zeroed so the player can't move while venting.
     this.player.setAlpha(0);
@@ -2275,6 +2456,10 @@ export class GameScene extends Phaser.Scene {
     const target = this.ventData.find(v => v.id === toVentId);
     if (!target) return;
 
+    // Play opening animation at the destination vent so someone standing
+    // near the exit can see the impostor emerge.
+    this.playVentAnimation(target.x, target.y);
+
     this.player.setPosition(target.x, target.y);
     this.currentVentId = toVentId;
 
@@ -2293,6 +2478,11 @@ export class GameScene extends Phaser.Scene {
   private exitVent() {
     if (!this.isInVent) return;
     this.isInVent = false;
+
+    // Show animation at the exit vent so nearby players can see the impostor emerge.
+    const vd = this.ventData.find(v => v.id === this.currentVentId);
+    if (vd) this.playVentAnimation(vd.x, vd.y);
+
     this.currentVentId = -1;
 
     this.player.setAlpha(1);
@@ -2305,6 +2495,47 @@ export class GameScene extends Phaser.Scene {
     if (this.isMultiplayer) {
       NetworkManager.room?.send('EXIT_VENT', {});
     }
+  }
+
+  /**
+   * Plays a brief vent-opening/closing animation at the given world position.
+   *
+   * Original Among Us behaviour: the vent grate visually opens and closes
+   * whenever someone enters or exits, making it visible to nearby crewmates.
+   * We reproduce this with a procedural Phaser tween — no new art needed.
+   *
+   * The animation runs in world space so it is affected by the camera (zoom
+   * and scroll) and by the fog of war, exactly as a real sprite would be.
+   * Only players close enough to see the vent will notice the flash.
+   */
+  private playVentAnimation(wx: number, wy: number) {
+    // Dark oval that rapidly expands (vent opens), holds briefly, then snaps
+    // shut — mimicking the vent grate lifting and falling.
+    const hole = this.add.ellipse(wx, wy + 4, 46, 18, 0x0a0a0a, 0.92).setDepth(15);
+    hole.setScale(0.05, 0.05);
+
+    this.tweens.add({
+      targets: hole,
+      scaleX: 1,
+      scaleY: 1,
+      duration: 160,
+      ease: 'Back.Out',
+      yoyo: true,
+      hold: 380,      // stay open while the impostor ducks in/out
+      onComplete: () => hole.destroy(),
+    });
+
+    // Metallic rim flash — simulates the grate catching light as it swings.
+    const rim = this.add.graphics().setDepth(14);
+    rim.lineStyle(2.5, 0xbbbbbb, 0.85);
+    rim.strokeEllipse(wx, wy + 4, 50, 22);
+    this.tweens.add({
+      targets: rim,
+      alpha: 0,
+      duration: 500,
+      delay: 60,
+      onComplete: () => rim.destroy(),
+    });
   }
 
   // ────────────────── Win Conditions ──────────────────
