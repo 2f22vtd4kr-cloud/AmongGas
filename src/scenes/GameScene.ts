@@ -147,12 +147,13 @@ export class GameScene extends Phaser.Scene {
     icon: Phaser.GameObjects.Triangle;
   }[] = [];
 
-  // --- fog of war ---
-  private fogInner!: Phaser.GameObjects.Rectangle;   // main darkness layer
-  private fogOuter!: Phaser.GameObjects.Rectangle;   // soft-edge transition layer
-  private fogMaskInner!: Phaser.GameObjects.Graphics;
-  private fogMaskOuter!: Phaser.GameObjects.Graphics;
-  private wallRects: WallRect[] = [];                // TMX collision rects — used by shadow-casting fog
+  // --- fog of war (native Canvas 2D, offscreen composite) ---
+  // Using an offscreen canvas instead of Phaser GeometryMasks so we can draw
+  // a proper radial gradient for the circular vision falloff. GeometryMasks
+  // are binary (pixel present or not) and cannot produce smooth alpha gradients.
+  private fogCanvas: HTMLCanvasElement | null = null;
+  private fogCtx: CanvasRenderingContext2D | null = null;
+  private wallRects: WallRect[] = [];   // TMX rects — used by shadow-casting
 
   // --- UI overlay ---
   // A second, unzoomed camera dedicated to HUD/UI. Camera zoom/rotation on
@@ -834,93 +835,101 @@ export class GameScene extends Phaser.Scene {
    */
   private setupFog() {
     const { width: W, height: H } = this.scale;
-
-    // Outer (transition) layer — lower alpha, larger hole
-    this.fogOuter = this.add.rectangle(W / 2, H / 2, W, H, 0x000000, 0.4)
-      .setScrollFactor(0).setDepth(48);
-    // Graphics used only as mask paths. scrollFactor(0) is REQUIRED: without it
-    // the canvas renderer applies the world-camera transform, shifting the drawn
-    // circle thousands of pixels off-screen and leaving the entire viewport dark.
-    // setVisible(false) hides the graphics visually; GeometryMask still reads
-    // the path data regardless of visibility.
-    this.fogMaskOuter = this.add.graphics().setScrollFactor(0).setVisible(false);
-    const outerMask = this.fogMaskOuter.createGeometryMask();
-    outerMask.invertAlpha = true;
-    this.fogOuter.setMask(outerMask);
-
-    // Inner (darkness) layer — high alpha, standard hole
-    this.fogInner = this.add.rectangle(W / 2, H / 2, W, H, 0x000000, 0.92)
-      .setScrollFactor(0).setDepth(49);
-    this.fogMaskInner = this.add.graphics().setScrollFactor(0).setVisible(false);
-    const innerMask = this.fogMaskInner.createGeometryMask();
-    innerMask.invertAlpha = true;
-    this.fogInner.setMask(innerMask);
-
-    // Fog layers and their mask graphics must not appear on the HUD camera
-    this.uiCamera.ignore([this.fogInner, this.fogOuter, this.fogMaskInner, this.fogMaskOuter]);
+    // Offscreen canvas — drawn via renderFogCanvas() each frame
+    this.fogCanvas = document.createElement('canvas');
+    this.fogCanvas.width  = W;
+    this.fogCanvas.height = H;
+    this.fogCtx = this.fogCanvas.getContext('2d')!;
+    // Hook into the HUD camera's pre-render so the fog is composited AFTER
+    // the world camera draws the map/players but BEFORE the HUD is drawn.
+    this.uiCamera.on('prerender', this.renderFogCanvas, this);
   }
 
   /**
-   * Called every frame from update(). Computes a 2D visibility polygon via
-   * shadow casting (walls block line-of-sight, matching the original game),
-   * then draws it as the fog mask so only the genuinely visible area is lit.
+   * Composites the fog of war onto the game canvas using native Canvas 2D.
+   * Hooked into uiCamera's 'prerender' event so the world camera has already
+   * drawn the map/players and the HUD camera will draw on top afterwards.
    *
-   * Inner mask  → visibility polygon at vision radius (hard wall shadow)
-   * Outer mask  → same polygon scaled ×1.35 outward from the player for the
-   *               soft-edge transition zone; scaling rather than a plain circle
-   *               stops the glow from bleeding through nearby walls.
+   * Visual design (matches the original Among Us):
    *
-   * Ghosts see the full map with no overlay.
+   *  Step 1 — Fill offscreen canvas with near-opaque darkness.
+   *
+   *  Step 2 — Erase a radial gradient disc of light centred on the player
+   *            (destination-out composite). The gradient is opaque at the
+   *            centre (erases all fog → fully bright), stays fully opaque to
+   *            60 % of the vision radius, then fades to transparent at
+   *            1.2× the vision radius. This produces the smooth circular
+   *            falloff seen in the original game — no hard ring edge.
+   *
+   *  Step 3 — Re-darken areas outside the visibility polygon using an
+   *            even-odd path fill (full-screen rect + polygon in the same path).
+   *            Even-odd fills the region INSIDE the rect but OUTSIDE the polygon,
+   *            i.e. exactly the areas that walls block from sight — restoring
+   *            hard, sharp shadow edges while leaving the gradient intact
+   *            everywhere else.
+   *
+   *  Step 4 — drawImage the offscreen fog canvas onto the live game canvas.
+   *
+   * Ghosts skip the whole thing; Phaser draws the unoccluded map for them.
    */
-  private updateFog() {
-    if (!this.player.isAlive) {
-      if (this.fogInner.visible) {
-        this.fogInner.setVisible(false);
-        this.fogOuter.setVisible(false);
-      }
-      return;
-    }
-    if (!this.fogInner.visible) {
-      this.fogInner.setVisible(true);
-      this.fogOuter.setVisible(true);
-    }
+  private renderFogCanvas() {
+    if (!this.fogCtx || !this.fogCanvas || !this.player) return;
+    if (!this.player.isAlive) return;
 
-    const cam = this.cameras.main;
+    const cam  = this.cameras.main;
+    const W    = this.fogCanvas.width;
+    const H    = this.fogCanvas.height;
+    const sx   = (this.player.x - cam.worldView.x) * cam.zoom;
+    const sy   = (this.player.y - cam.worldView.y) * cam.zoom;
 
-    // 'lights' sabotage blinds crewmates only — impostors see normally.
     const crewVision = (this.sabotageType === 'lights') ? CREW_VISION_SABOTAGED : CREW_VISION;
-    const visionRadius = this.player.isImpostor ? IMP_VISION : crewVision;
+    const visionR    = (this.player.isImpostor ? IMP_VISION : crewVision) * cam.zoom;
 
-    // Compute visibility polygon in world space, convert to screen space.
+    const ctx = this.fogCtx;
+    ctx.clearRect(0, 0, W, H);
+
+    // ── Step 1: full-screen darkness ─────────────────────────────────────────
+    ctx.fillStyle = 'rgba(10,10,10,0.96)';
+    ctx.fillRect(0, 0, W, H);
+
+    // ── Step 2: erase a soft disc of light at the player ─────────────────────
+    // Radial gradient (destination-out): alpha=1 erases the dark fog completely,
+    // alpha=0 leaves it untouched. The colour value (black) doesn't matter for
+    // destination-out — only the alpha channel is used to punch out the fog.
+    ctx.globalCompositeOperation = 'destination-out';
+    const grad = ctx.createRadialGradient(sx, sy, 0, sx, sy, visionR * 1.2);
+    grad.addColorStop(0,    'rgba(0,0,0,1)'); // fully bright at player centre
+    grad.addColorStop(0.60, 'rgba(0,0,0,1)'); // still fully bright at 60 % of radius
+    grad.addColorStop(1.0,  'rgba(0,0,0,0)'); // fades to nothing at 1.2× radius
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+
+    // ── Step 3: restore hard wall shadows via even-odd fill ───────────────────
+    // Path = [full screen rect] + [visibility polygon].
+    // Even-odd rule: inside rect AND outside polygon → filled (wall shadow).
+    //                inside rect AND inside polygon  → not filled (keep gradient).
     const worldPoly = computeVisibilityPolygon(
-      this.player.x, this.player.y, visionRadius, this.wallRects,
+      this.player.x, this.player.y, visionR / cam.zoom, this.wallRects,
     );
-    const screenPoly = worldPoly.map(p => ({
-      x: (p.x - cam.worldView.x) * cam.zoom,
-      y: (p.y - cam.worldView.y) * cam.zoom,
-    }));
-
-    // ── Inner mask: exact visibility polygon ──
-    this.fogMaskInner.clear();
-    this.fogMaskInner.fillStyle(0xffffff);
-    if (screenPoly.length >= 3) {
-      this.fogMaskInner.fillPoints(screenPoly as Phaser.Types.Math.Vector2Like[], true, true);
+    if (worldPoly.length >= 3) {
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.fillStyle = 'rgba(10,10,10,0.97)';
+      const toSx = (wx: number) => (wx - cam.worldView.x) * cam.zoom;
+      const toSy = (wy: number) => (wy - cam.worldView.y) * cam.zoom;
+      ctx.beginPath();
+      ctx.rect(0, 0, W, H);                                // outer boundary
+      ctx.moveTo(toSx(worldPoly[0].x), toSy(worldPoly[0].y));
+      for (let i = 1; i < worldPoly.length; i++) {
+        ctx.lineTo(toSx(worldPoly[i].x), toSy(worldPoly[i].y));
+      }
+      ctx.closePath();
+      ctx.fill('evenodd');
     }
 
-    // ── Outer mask: scaled-out polygon for soft falloff ──
-    // Each point is pushed away from the player by ×1.35, so the glow
-    // follows the wall silhouette instead of bleeding as a flat circle.
-    const { x: ppx, y: ppy } = this.player;
-    const outerPoly = worldPoly.map(p => ({
-      x: (ppx + (p.x - ppx) * 1.35 - cam.worldView.x) * cam.zoom,
-      y: (ppy + (p.y - ppy) * 1.35 - cam.worldView.y) * cam.zoom,
-    }));
-
-    this.fogMaskOuter.clear();
-    this.fogMaskOuter.fillStyle(0xffffff);
-    if (outerPoly.length >= 3) {
-      this.fogMaskOuter.fillPoints(outerPoly as Phaser.Types.Math.Vector2Like[], true, true);
-    }
+    // ── Step 4: composite fog onto the live game canvas ───────────────────────
+    ctx.globalCompositeOperation = 'source-over';
+    const gameCtx = this.game.canvas.getContext('2d')!;
+    gameCtx.drawImage(this.fogCanvas, 0, 0);
   }
 
   /**
@@ -1178,8 +1187,7 @@ export class GameScene extends Phaser.Scene {
     // Player
     this.player.update(this.cursors, this.wasd, delta, this.joystickForce);
 
-    // Fog of war
-    this.updateFog();
+    // Fog of war is rendered via uiCamera 'prerender' hook in renderFogCanvas()
 
     if (this.isMultiplayer) {
       // Multiplayer (Phase 2: Position Sync) — no local bots or win-checking;
@@ -2170,6 +2178,11 @@ export class GameScene extends Phaser.Scene {
       this.sound.stopByKey(`amb_${key}`);
     }
     this.ambientPlaying.clear();
+
+    // Detach the fog canvas hook (prevents stale draws after scene restart)
+    this.uiCamera?.off('prerender', this.renderFogCanvas, this);
+    this.fogCanvas = null;
+    this.fogCtx    = null;
 
     // Multiplayer: tear down remote player sprites (their schema listeners
     // are torn down automatically by Colyseus when the room is left/disposed)

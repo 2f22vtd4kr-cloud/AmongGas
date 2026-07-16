@@ -1,51 +1,76 @@
 ---
 name: Fog of war implementation
-description: How the Among Us fog of war (visibility) is built in GameScene — approach, constraints, and key gotchas.
+description: How the Among Us fog of war is rendered in GameScene — approach, constraints, Canvas 2D compositing, and key gotchas.
 ---
 
 # Fog of war — GameScene.ts
 
-## The rule
-Two stacked `GeometryMask invertAlpha=true` rectangles (Canvas + WebGL compatible):
-- `fogInner` alpha 0.92, mask = **visibility polygon** — main darkness, wall-blocked
-- `fogOuter` alpha 0.40, mask = same polygon scaled ×1.35 outward from player — soft glow falloff
+## The rule (current implementation)
+Fog is rendered via **native Canvas 2D on an offscreen HTMLCanvasElement**, NOT Phaser GeometryMasks.
+The offscreen canvas is composited onto the game canvas in a `uiCamera 'prerender'` hook so the HUD camera renders on top.
 
-Vision radii (world units, from `src/settings.ts`):
+Vision radii (world units, `src/settings.ts`):
 - `CREW_VISION = 200` → ~290 px at zoom 1.45
 - `IMP_VISION  = 280` → ~406 px at zoom 1.45
-- Ghosts: both layers hidden (`!player.isAlive`)
+- Ghosts: `renderFogCanvas()` returns early — full map visible
 
-**Why shadow casting:** The original Among Us blocks line-of-sight through walls, producing an irregular polygon rather than a circle. Replicating this uses `src/utils/visibility.ts` — `computeVisibilityPolygon()` — which casts rays to each wall corner (±ε for behind-corner visibility) plus 36 boundary samples for the circular falloff in open areas.
+## Why native Canvas 2D (not Phaser GeometryMask)
+GeometryMask is **binary** — a pixel is either in the mask or not. There is no way to assign varying alpha to different parts of a GeometryMask path in Phaser Canvas mode. This means any GeometryMask approach produces **hard stepped edges**, never a smooth gradient. The original Among Us uses a radial gradient for its circular vision falloff — this requires actual Canvas 2D `createRadialGradient`.
 
-**Why:** GeometryMask is the only masking mode that works in both Canvas and WebGL renderers. BitmapMask and RenderTexture.erase() are WebGL-only; this game runs Canvas (confirmed from Phaser boot log).
+## The compositing algorithm (renderFogCanvas)
 
-## Shadow casting implementation (src/utils/visibility.ts)
-- Filters 194 TMX wall rects to those within `radius × 1.5`
-- Extracts 4 edges per nearby wall; casts rays at each corner angle (−ε, exact, +ε) + 36 boundary samples
-- Returns sorted `{x,y}[]` polygon in world coords
-- Stored on `GameScene.wallRects: WallRect[]` from the TMX parse at scene create
-
-## How to draw the mask
-Both masks use `Graphics.fillPoints(screenPoly, true, true)` after `fillStyle(0xffffff)`.  
-World → screen conversion:
-```typescript
-const screenPoly = worldPoly.map(p => ({
-  x: (p.x - cam.worldView.x) * cam.zoom,
-  y: (p.y - cam.worldView.y) * cam.zoom,
-}));
 ```
-Outer polygon: scale each world point away from player by ×1.35 before converting.
+Step 1 — fillRect with near-opaque black (alpha 0.96) on the offscreen canvas.
 
-## Gotcha 1: mask Graphics MUST have `setScrollFactor(0)` — critical
-Without `setScrollFactor(0)`, the canvas renderer applies the world-camera transform to the mask Graphics.  
-The polygon is drawn at e.g. `(375, 667)` in local space, but after camera transform that maps to `~(-4881, …)` — thousands of pixels off-screen.  
-Result: mask clips nothing → entire viewport is dark.  
-**Fix:** `this.add.graphics().setScrollFactor(0).setVisible(false)` on BOTH mask objects.
+Step 2 — destination-out with a radial gradient centred on the player:
+         alpha=1 from 0 to 60% of visionR*1.2  (fully erases fog → bright)
+         alpha=0 at visionR*1.2                 (no erasure → full dark)
+         Result: a soft-edged lit disc, bright at centre, fading at edge.
 
-## Gotcha 2: `{ add: false }` removed from Phaser 3.90 typings
-`this.make.graphics({ add: false })` throws TS2353 — `add` is not in the `Options` type.  
-Fix: `this.add.graphics().setScrollFactor(0).setVisible(false)`.  
-Also call `this.uiCamera.ignore([fogInner, fogOuter, fogMaskInner, fogMaskOuter])` so the HUD camera doesn't double-render them.
+Step 3 — source-over fill with even-odd path rule:
+         path = [full-screen rect] + [visibility polygon]
+         even-odd fills the region inside the rect but OUTSIDE the polygon.
+         This re-darkens wall-shadow areas with full opacity (0.97),
+         restoring hard crisp shadows while leaving the gradient intact elsewhere.
+
+Step 4 — gameCtx.drawImage(fogCanvas, 0, 0) onto the live game canvas.
+```
+
+## Wall shadow correctness (Why step 3 works)
+Even-odd rule for two sub-paths:
+- Point inside polygon: rect-crossing(1) + polygon-crossing(1) = 2 = even → NOT filled ✓
+- Point outside polygon but inside screen: rect-crossing(1) + polygon-crossing(0 or 2) = odd → filled ✓
+
+## Visibility polygon (src/utils/visibility.ts)
+`computeVisibilityPolygon(px, py, radius, wallRects)`:
+- Filters 194 TMX wall rects to those within radius×1.5
+- Casts rays at each wall corner angle (±ε for behind-corner accuracy) + 36 boundary samples
+- Returns sorted `{x, y}[]` polygon in world coords
+- Stored on `GameScene.wallRects: WallRect[]` from TMX parse in create()
+
+## Camera hook ordering (CRITICAL)
+```typescript
+this.uiCamera.on('prerender', this.renderFogCanvas, this);
+```
+This fires AFTER the world camera renders map/players but BEFORE the HUD camera renders buttons/joystick.
+Fog appears between world and HUD — correct layering.
+
+**Must be cleaned up in shutdown():**
+```typescript
+this.uiCamera?.off('prerender', this.renderFogCanvas, this);
+this.fogCanvas = null; this.fogCtx = null;
+```
+
+## Gotcha: getContext('2d') on the game canvas
+`this.game.canvas.getContext('2d')` is cached by the browser — safe to call each frame.
+The offscreen `fogCanvas` width/height must match `this.scale.width/height` (internal resolution), not CSS display size.
+
+## Gotcha: Previous GeometryMask approach (DO NOT revert to this)
+The old approach (fogInner 0.92 alpha + fogOuter 0.4 alpha, both GeometryMask invertAlpha=true) produced:
+- 0% fog inside inner polygon (good)
+- 92% fog just outside inner polygon → **sharp 0%→92% step at polygon boundary** ← the bug
+- 95% fog outside outer polygon
+The stepped layers cannot create a gradient because GeometryMask is binary in Canvas mode.
 
 ## Tuning
-Adjust `CREW_VISION` / `IMP_VISION` in `src/settings.ts`. At zoom 1.45, 1 world unit ≈ 1.45 screen px. Viewport half-width ≈ 258 world units — a radius below that creates visible dark corners.
+Gradient stops are at `colorStop(0.60, opaque)` and `colorStop(1.0, transparent)` relative to a radius of `visionR × 1.2`. So the bright zone extends to `visionR × 0.72` and the falloff spans from `visionR × 0.72` to `visionR × 1.2` (≈ 48% of vision radius wide). Adjust the 0.60 stop to make the bright zone larger/smaller.
