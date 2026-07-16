@@ -44,9 +44,12 @@ Even-odd rule for two sub-paths:
 ## Visibility polygon (src/utils/visibility.ts)
 `computeVisibilityPolygon(px, py, radius, wallRects)`:
 - Filters 194 TMX wall rects to those within radius×1.5
-- Casts rays at each wall corner angle (±ε for behind-corner accuracy) + 36 boundary samples
+- For each wall edge: corner angles (±ε) + **circle-edge intersection angles** (±ε)
+  The intersection angles are critical: when all 4 wall corners are beyond the vision radius,
+  corner-angle rays miss the wall entirely and fall back to coarse 15°-grid boundary rays.
+  Circle-edge intersections give exact shadow-boundary angles in that case.
+- 24 boundary rays (fallback for open areas)
 - Returns sorted `{x, y}[]` polygon in world coords
-- Stored on `GameScene.wallRects: WallRect[]` from TMX parse in create()
 
 ## Camera hook ordering (CRITICAL)
 ```typescript
