@@ -132,6 +132,9 @@ export class GameScene extends Phaser.Scene {
   // Used to swap textures: base / highlight (player nearby) / connected (done).
   private taskSprites = new Map<string, Phaser.GameObjects.Image>();
 
+  // --- room name label ---
+  private roomNameText?: Phaser.GameObjects.Text;
+
   // --- task list HUD ---
   private taskListRows: Phaser.GameObjects.Text[] = [];
   private taskListBg?: Phaser.GameObjects.Rectangle;
@@ -640,6 +643,19 @@ export class GameScene extends Phaser.Scene {
     // Sabotage banner — top-of-screen alert shown to everyone while a
     // sabotage is active (countdown for reactor/o2, status text for the rest).
     this.buildSabotageBanner();
+
+    // Room name label — bottom-centre, matches the original Among Us HUD:
+    // shows the name of the room the player is currently inside (e.g. "O2"),
+    // and hides automatically when they're in a corridor between rooms.
+    this.roomNameText = this.add.text(W / 2, H - 48 - this.safeBot, '', {
+      fontSize: '30px',
+      color: '#ffffff',
+      stroke: '#000000',
+      strokeThickness: 5,
+      fontFamily: 'Arial',
+      fontStyle: 'bold',
+    }).setOrigin(0.5, 1).setDepth(102);
+    this.hud.add(this.roomNameText);
 
     // Task list panel — left side, below emergency button
     this.buildTaskListInHud();
@@ -1237,6 +1253,9 @@ export class GameScene extends Phaser.Scene {
 
     // Nearby detection
     this.detectNearby();
+
+    // Room name label (bottom-centre — shows current room name like original)
+    this.updateRoomLabel();
 
     // Ambient sounds
     this.updateAmbient();
@@ -2074,6 +2093,29 @@ export class GameScene extends Phaser.Scene {
         impostorName: this.bots.find(b => b.isImpostor)?.botName ?? '???',
       });
     });
+  }
+
+  // ────────────────── Room name label ──────────────────
+
+  /**
+   * Shows the current room name at the bottom-centre of the HUD, matching
+   * the original Among Us style: the label only appears when the player is
+   * inside a known room zone (within its AMBIENT_CENTRES radius). Corridors
+   * and hallways between rooms show nothing.
+   */
+  private updateRoomLabel() {
+    if (!this.roomNameText) return;
+    const px = this.player.x, py = this.player.y;
+    let found: string | null = null;
+    for (const [key, centre] of Object.entries(AMBIENT_CENTRES)) {
+      const d = Phaser.Math.Distance.Between(px, py, centre.x, centre.y);
+      if (d <= centre.radius) {
+        found = ROOM_DISPLAY_NAMES[key] ?? null;
+        break;
+      }
+    }
+    this.roomNameText.setText(found ?? '');
+    this.roomNameText.setVisible(found !== null);
   }
 
   // ────────────────── Ambient ──────────────────
