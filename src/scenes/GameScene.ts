@@ -1016,7 +1016,7 @@ export class GameScene extends Phaser.Scene {
     // geometry (floor tiles, wall outlines) barely shows through — matching
     // the cool "unlit" look of the original game. Wall-shadow areas get a
     // second near-opaque pass in Step 3 so they stay very dark.
-    ctx.fillStyle = 'rgba(0,5,12,0.44)';
+    ctx.fillStyle = 'rgba(0,5,12,0.40)';
     ctx.fillRect(0, 0, W, H);
 
     // ── Step 2: erase a soft disc of light at the player ─────────────────────
@@ -1033,20 +1033,31 @@ export class GameScene extends Phaser.Scene {
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, W, H);
 
-    // ── Step 3: restore hard wall shadows via even-odd fill ───────────────────
-    // Path = [full screen rect] + [visibility polygon].
-    // Even-odd rule: inside rect AND outside polygon → filled (wall shadow).
-    //                inside rect AND inside polygon  → not filled (keep gradient).
-    // Polygon radius = visionR × 1.2 to match the gradient's outer edge.
-    // See the comment above for why this must be 1.2× and not 1.0×.
+    // ── Step 3: hard wall shadows — near-opaque, CLIPPED to the vision disc ──
+    // WHY clip: wall shadows sit on gradient-erased pixels (alpha≈0). Drawing
+    // 0.9 opacity there gives 90 % darkness inside the lit zone. But WITHOUT
+    // clipping, that same fill also covers every pixel outside the disc (which
+    // already has the 0.44 base fog), compounding to ~0.94 opacity — a near-
+    // blackout that kills the "map-always-visible" ambient fog.  Clipping to
+    // the disc means:
+    //   • inside disc + inside polygon  → fully lit (gradient erased, no fill)
+    //   • inside disc + outside polygon → 90 % dark  (dramatic wall shadow)
+    //   • outside disc                  → 44 % dark  (gentle ambient fog, unchanged)
     const worldPoly = computeVisibilityPolygon(
       this.player.x, this.player.y, (visionR * 1.2) / cam.zoom, this.wallRects,
     );
     if (worldPoly.length >= 3) {
-      ctx.globalCompositeOperation = 'source-over';
-      ctx.fillStyle = 'rgba(0,2,8,0.55)'; // wall shadows noticeably darker than open-fog areas
       const toSx = (wx: number) => (wx - cam.worldView.x) * cam.zoom;
       const toSy = (wy: number) => (wy - cam.worldView.y) * cam.zoom;
+
+      ctx.save();
+      // Clip drawing to the vision disc so the fill never touches the ambient fog
+      ctx.beginPath();
+      ctx.arc(sx, sy, visionR * 1.2, 0, Math.PI * 2);
+      ctx.clip();
+
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.fillStyle = 'rgba(0,2,8,0.90)'; // near-opaque — dramatic wall shadows
       ctx.beginPath();
       ctx.rect(0, 0, W, H);                                // outer boundary
       ctx.moveTo(toSx(worldPoly[0].x), toSy(worldPoly[0].y));
@@ -1055,6 +1066,8 @@ export class GameScene extends Phaser.Scene {
       }
       ctx.closePath();
       ctx.fill('evenodd');
+
+      ctx.restore(); // removes clip; also resets any state changes inside the block
     }
 
     // ── Step 4: composite fog onto the live game canvas ───────────────────────

@@ -83,7 +83,7 @@ const TABLES=[
 // ── Rendering ─────────────────────────────────────────────────────────────────
 // Player stands just below the centre-left table in the cafeteria
 const PLAYER = {x:3050, y:870};
-const VISION_R = 200;   // world units — matches CREW_VISION in settings.ts
+const VISION_R = 300;   // world units — sized so the fog ring is visible within the 550 px demo canvas
 const ZOOM = 0.75;      // matches new CAMERA_ZOOM in settings.ts
 
 // The canvas size and how many world units are visible
@@ -101,7 +101,7 @@ function applyFog(ctx, poly, shadowTables){
   fog.width=CW; fog.height=CH;
   const fc=fog.getContext('2d');
 
-  fc.fillStyle='rgba(0,5,12,0.44)';
+  fc.fillStyle='rgba(0,5,12,0.40)';
   fc.fillRect(0,0,CW,CH);
 
   const sx=tx(PLAYER.x),sy=ty(PLAYER.y),visionR=VISION_R*SCALE;
@@ -113,12 +113,16 @@ function applyFog(ctx, poly, shadowTables){
   fc.fillStyle=g; fc.fillRect(0,0,CW,CH);
 
   if(poly.length>=3){
+    // Clip to vision disc so high-opacity shadows don't compound with ambient fog
+    fc.save();
+    fc.beginPath(); fc.arc(sx,sy,visionR*1.2,0,Math.PI*2); fc.clip();
     fc.globalCompositeOperation='source-over';
-    fc.fillStyle='rgba(0,2,8,0.55)';
+    fc.fillStyle='rgba(0,2,8,0.90)'; // near-opaque — dramatic wall shadows
     fc.beginPath(); fc.rect(0,0,CW,CH);
     fc.moveTo(tx(poly[0].x),ty(poly[0].y));
     for(let i=1;i<poly.length;i++) fc.lineTo(tx(poly[i].x),ty(poly[i].y));
     fc.closePath(); fc.fill('evenodd');
+    fc.restore();
   }
   fc.globalCompositeOperation='source-over';
   ctx.drawImage(fog,0,0);
