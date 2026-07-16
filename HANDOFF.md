@@ -389,14 +389,13 @@ See §9 for the full original-vs-clone gap analysis. Implement in this order:
 | **Room name label** (bottom-centre HUD) | Shows current room name (e.g. "O2") when inside a room zone; hidden in corridors — added Session 14 |
 
 ### ❌ Missing — high gameplay impact
-| Gap | What original does |
-|---|---|
-| **Venting** | Impostor-only: enter vent network, travel between nodes, emerge elsewhere |
+
+*(none remaining — all high-impact gaps resolved)*
 
 ### ⚠️ Missing — medium impact
 | Gap | What original does |
 |---|---|
-| **Admin map** | Interactive table shows coloured player-room dots in real time |
+| **Admin map — count badge** | Room dot clusters show player count number (Task #3) |
 | **Security cameras** | Watch static camera feeds from Security room |
 | **Multi-step tasks** | Fix Wiring (3 locations), Fuel Engines (2 stages), Divert Power (Electrical → target room) |
 | **Fake tasks** | Impostor stands at consoles faking animation |
