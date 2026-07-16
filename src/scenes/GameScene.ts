@@ -314,12 +314,14 @@ export class GameScene extends Phaser.Scene {
 
     // ── Parse TMX for collision + objects ──
     const tmxText = this.cache.text.get('map_tmx') as string;
-    const { walls: wallRects, objects: mapObjs } = parseTmx(tmxText);
-    this.wallRects = wallRects; // keep for per-frame shadow casting in updateFog()
+    const { walls, tables, objects: mapObjs } = parseTmx(tmxText);
+    // Only true WALLS cast fog-of-war shadows — tables are transparent to vision
+    // (matching original Among Us: cafeteria tables do not block line-of-sight).
+    this.wallRects = walls;
 
-    // ── Static walls ──
+    // ── Static walls + tables (both block movement, only walls cast shadows) ──
     this.walls = this.physics.add.staticGroup();
-    for (const wr of wallRects) {
+    for (const wr of [...walls, ...tables]) {
       const r = this.add.rectangle(wr.x + wr.width / 2, wr.y + wr.height / 2, wr.width, wr.height);
       r.setVisible(false);
       r.setDepth(0);

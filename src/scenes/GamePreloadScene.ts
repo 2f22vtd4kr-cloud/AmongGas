@@ -45,6 +45,9 @@ export class GamePreloadScene extends Phaser.Scene {
     const fastMode = !!this.registry.get('fastMode');
 
     // ── Fast mode: load only essentials for a gameplay screenshot ──
+    // No audio loaded — visual-only preview. All bot color textures are
+    // stubbed as 1×1 transparent canvases so GameScene doesn't crash on
+    // missing animations when bots spawn with non-Blue colours.
     if (fastMode) {
       this.load.image('map_bg',  'Assets/Maps/map2back.png');
       this.load.text('map_tmx',  'Assets/Maps/map_final.backv2.tmx');
@@ -66,8 +69,8 @@ export class GamePreloadScene extends Phaser.Scene {
       this.load.image('ui_sabotage_icon',  'Assets/Images/UI/sabotage_icon.png');
       this.load.image('ui_sabotage_dim',   'Assets/Images/UI/sabotage_icon_dim.png');
       this.load.image('ui_close',          'Assets/Images/UI/close.PNG');
-      this.load.audio('sfx_roundstart', 'Assets/Sounds/General/roundstart.wav');
-      // Stub remaining keys as 1×1 pixel so GameScene doesn't crash on missing textures
+      // NO audio in fast mode — shaves ~800 KB and avoids the last-percent stall
+      // that prevented the screenshot tool from capturing actual gameplay.
       return;
     }
 

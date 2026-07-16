@@ -22,7 +22,7 @@ function parseTmxWalls(tmxText) {
   for (const m of tmxText.matchAll(blockRe)) {
     const attrs = m[1];
     const name = (attrs.match(/\bname="([^"]*)"/) ?? [])[1] ?? '';
-    if (name !== 'walls' && name !== 'tables') continue;
+    if (name !== 'walls') continue; // tables no longer cast shadows (matches TmxParser.ts fix)
     const x = parseFloat((attrs.match(/\bx="([^"]*)"/) ?? [])[1] ?? '0');
     const y = parseFloat((attrs.match(/\by="([^"]*)"/) ?? [])[1] ?? '0');
     const w = parseFloat((attrs.match(/\bwidth="([^"]*)"/) ?? [])[1] ?? '0');

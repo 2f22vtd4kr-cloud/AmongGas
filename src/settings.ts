@@ -34,7 +34,7 @@ export const ALL_COLORS = ['Black', 'Blue', 'Brown', 'Green', 'Orange', 'Pink', 
 // Camera zoom for the portrait viewport — the frame is narrower than the
 // original landscape design, so we zoom in to keep the player and nearby
 // objects readable while still showing enough of the surrounding room.
-export const CAMERA_ZOOM = 1.45;
+export const CAMERA_ZOOM = 0.75;
 
 // Kill / interact detection radius
 export const KILL_RADIUS = 80;

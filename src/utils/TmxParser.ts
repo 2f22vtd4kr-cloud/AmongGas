@@ -2,18 +2,24 @@ import type { WallRect, MapObject } from '../types';
 
 export interface TmxData {
   walls: WallRect[];
+  tables: WallRect[];
   objects: MapObject[];
 }
 
 /**
  * Parse a Tiled TMX (XML) string and extract obstacle rectangles
  * and named interactive objects from the object layer.
+ *
+ * walls  — block both movement AND fog-of-war vision (cast hard shadows)
+ * tables — block movement only; transparent to vision (original Among Us behaviour:
+ *          cafeteria tables do not cast fog shadows)
  */
 export function parseTmx(tmxText: string): TmxData {
   const parser = new DOMParser();
   const doc = parser.parseFromString(tmxText, 'text/xml');
 
   const walls: WallRect[] = [];
+  const tables: WallRect[] = [];
   const objects: MapObject[] = [];
 
   const objectGroups = doc.querySelectorAll('objectgroup');
@@ -28,9 +34,13 @@ export function parseTmx(tmxText: string): TmxData {
       const h = parseFloat(el.getAttribute('height') ?? '0');
       const id = parseInt(el.getAttribute('id') ?? '0', 10);
 
-      if (name === 'walls' || name === 'tables') {
-        // Collision rects
+      if (name === 'walls') {
+        // Walls block movement AND cast fog-of-war shadows
         walls.push({ x, y, width: w, height: h });
+      } else if (name === 'tables') {
+        // Tables block movement but are transparent to vision —
+        // matching original Among Us where cafeteria tables cast no shadows
+        tables.push({ x, y, width: w, height: h });
       } else if (name !== 'props') {
         // Interactive / named objects
         objects.push({ id, name, x, y, width: w, height: h });
@@ -38,5 +48,5 @@ export function parseTmx(tmxText: string): TmxData {
     }
   }
 
-  return { walls, objects };
+  return { walls, tables, objects };
 }

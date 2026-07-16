@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Among Gas — Vision Demo</title>
+<style>
+body { margin: 0; background: #1a0a2e; display: flex; flex-direction: column; align-items: center; padding: 16px; }
+h1 { color: #fff; font-family: monospace; font-size: 16px; margin-bottom: 4px; }
+p  { color: #aaa; font-family: monospace; font-size: 12px; margin: 0 0 12px; text-align:center; }
+.row { display: flex; gap: 16px; }
+.panel { display: flex; flex-direction: column; align-items: center; }
+.label { color: #ffe600; font-family: monospace; font-size: 13px; margin-bottom: 4px; font-weight: bold; text-align:center; }
+.sub { color:#88aaff; font-family:monospace; font-size:11px; margin-bottom:6px; }
+</style>
+</head>
+<body>
+<h1>Among Gas — Fog of War: Before &amp; After Fix</h1>
+<p>Cafeteria view. Green dot = player. CREW_VISION = 200 wu. Camera zoom 0.75×.</p>
+<div class="row" id="row"></div>
+
+<script>
+// ── Visibility algorithm ──────────────────────────────────────────────────────
+function raySegT(ox,oy,dx,dy,ax,ay,bx,by){
+  const rx=bx-ax,ry=by-ay,d=dx*ry-dy*rx;
+  if(Math.abs(d)<1e-10)return null;
+  const t=((ax-ox)*ry-(ay-oy)*rx)/d,u=((ax-ox)*dy-(ay-oy)*dx)/d;
+  return(t<-1e-10||u<-1e-10||u>1+1e-10)?null:t;
+}
+function circleSeg(px,py,r,ax,ay,bx,by){
+  const dx=bx-ax,dy=by-ay,ex=ax-px,ey=ay-py,a=dx*dx+dy*dy;
+  if(a<1e-10)return[];
+  const b=2*(ex*dx+ey*dy),c=ex*ex+ey*ey-r*r,disc=b*b-4*a*c;
+  if(disc<0)return[];
+  const sqD=Math.sqrt(disc),out=[];
+  for(const t of[(-b-sqD)/(2*a),(-b+sqD)/(2*a)])
+    if(t>1e-6&&t<1+1e-6){const tt=Math.min(t,1);out.push(Math.atan2(ay+tt*dy-py,ax+tt*dx-px));}
+  return out;
+}
+function computeVis(px,py,radius,rects){
+  const r15sq=radius*radius*2.25;
+  const nearby=rects.filter(w=>{
+    const cx=Math.max(w.x,Math.min(px,w.x+w.w)),cy=Math.max(w.y,Math.min(py,w.y+w.h));
+    return (cx-px)**2+(cy-py)**2<r15sq;
+  });
+  const segs=[],angles=[],EPS=0.0001;
+  for(const w of nearby){
+    const x1=w.x,y1=w.y,x2=w.x+w.w,y2=w.y+w.h;
+    for(const[ax,ay,bx,by]of[[x1,y1,x2,y1],[x2,y1,x2,y2],[x2,y2,x1,y2],[x1,y2,x1,y1]]){
+      segs.push({ax,ay,bx,by});
+      for(const a of circleSeg(px,py,radius,ax,ay,bx,by))angles.push(a-EPS,a,a+EPS);
+    }
+    for(const[cx,cy]of[[x1,y1],[x2,y1],[x1,y2],[x2,y2]]){
+      const a=Math.atan2(cy-py,cx-px);angles.push(a-EPS,a,a+EPS);
+    }
+  }
+  for(let i=0;i<64;i++)angles.push(-Math.PI+(i/64)*Math.PI*2);
+  const pts=[];
+  for(const angle of angles){
+    const ddx=Math.cos(angle),ddy=Math.sin(angle);let minT=radius;
+    for(const s of segs){const t=raySegT(px,py,ddx,ddy,s.ax,s.ay,s.bx,s.by);if(t!==null&&t>0&&t<minT)minT=t;}
+    pts.push({angle,x:px+ddx*minT,y:py+ddy*minT});
+  }
+  return pts.sort((a,b)=>a.angle-b.angle);
+}
+
+// ── Map data ──────────────────────────────────────────────────────────────────
+// Walls = cast shadows | Tables = do NOT cast shadows (the fix)
+const WALLS=[
+  {x:2596.17,y:224.667,w:76.667,h:359},{x:2777,y:12.667,w:1016,h:60.667},
+  {x:2595.67,y:775.001,w:75.197,h:386.666},{x:4014.67,y:252.667,w:249,h:323.667},
+  {x:4015.67,y:775,w:49.333,h:288},{x:4817.76,y:528,w:56.333,h:400.933},
+  {x:1673,y:527,w:923.333,h:56},{x:1673,y:775,w:572.667,h:88},
+  {x:2407,y:775,w:188.65,h:88},{x:2002,y:843,w:78,h:902.875},
+  {x:2176,y:1512,w:634,h:45},{x:2179,y:1611,w:634,h:63},
+  {x:2802,y:1367,w:42,h:186},{x:2806,y:1611,w:42,h:212},
+];
+const TABLES=[
+  {x:2897,y:319,w:224,h:168},{x:3496,y:312,w:224,h:168},
+  {x:3204,y:632,w:224,h:167},{x:3497,y:939,w:224,h:172},
+  {x:2900,y:935,w:224,h:168},
+];
+
+// ── Rendering ─────────────────────────────────────────────────────────────────
+// Player stands just below the centre-left table in the cafeteria
+const PLAYER = {x:3050, y:870};
+const VISION_R = 200;   // world units — matches CREW_VISION in settings.ts
+const ZOOM = 0.75;      // matches new CAMERA_ZOOM in settings.ts
+
+// The canvas size and how many world units are visible
+const CW=550, CH=550;   // canvas px
+// At zoom 0.75, the game shows CW/0.75 world units wide in the 750px canvas.
+// Scale the demo the same way.
+const SCALE = ZOOM;     // px per world unit in the demo (same ratio as in-game)
+
+// world → screen
+const tx = wx => (wx - PLAYER.x) * SCALE + CW/2;
+const ty = wy => (wy - PLAYER.y) * SCALE + CH/2;
+
+function applyFog(ctx, poly, shadowTables){
+  const fog = document.createElement('canvas');
+  fog.width=CW; fog.height=CH;
+  const fc=fog.getContext('2d');
+
+  fc.fillStyle='rgba(10,10,10,0.96)';
+  fc.fillRect(0,0,CW,CH);
+
+  const sx=tx(PLAYER.x),sy=ty(PLAYER.y),visionR=VISION_R*SCALE;
+  fc.globalCompositeOperation='destination-out';
+  const g=fc.createRadialGradient(sx,sy,0,sx,sy,visionR*1.2);
+  g.addColorStop(0,'rgba(0,0,0,1)');
+  g.addColorStop(0.6,'rgba(0,0,0,1)');
+  g.addColorStop(1,'rgba(0,0,0,0)');
+  fc.fillStyle=g; fc.fillRect(0,0,CW,CH);
+
+  if(poly.length>=3){
+    fc.globalCompositeOperation='source-over';
+    fc.fillStyle='rgba(10,10,10,0.97)';
+    fc.beginPath(); fc.rect(0,0,CW,CH);
+    fc.moveTo(tx(poly[0].x),ty(poly[0].y));
+    for(let i=1;i<poly.length;i++) fc.lineTo(tx(poly[i].x),ty(poly[i].y));
+    fc.closePath(); fc.fill('evenodd');
+  }
+  fc.globalCompositeOperation='source-over';
+  ctx.drawImage(fog,0,0);
+}
+
+function drawPanel(canvas, shadowTables, mapImg){
+  const ctx=canvas.getContext('2d');
+  ctx.fillStyle='#222230'; ctx.fillRect(0,0,CW,CH);
+
+  // Draw map background clipped to this viewport
+  if(mapImg){
+    // The map image covers the full world (5792×3168).
+    // We need to draw the slice visible around PLAYER.
+    const worldW=5792, worldH=3168;
+    const halfWW=CW/(2*SCALE), halfWH=CH/(2*SCALE);
+    const srcX=(PLAYER.x - halfWW)*worldW/5792;
+    const srcY=(PLAYER.y - halfWH)*worldH/3168;
+    const srcW=halfWW*2*worldW/5792;
+    const srcH=halfWH*2*worldH/3168;
+    ctx.drawImage(mapImg, srcX, srcY, srcW, srcH, 0, 0, CW, CH);
+  }
+
+  // Compute visibility polygon (with or without tables as occluders)
+  const shadowRects = shadowTables ? [...WALLS,...TABLES] : WALLS;
+  const poly=computeVis(PLAYER.x,PLAYER.y,VISION_R,shadowRects);
+
+  // Apply fog of war
+  applyFog(ctx, poly, shadowTables);
+
+  // Player dot
+  ctx.fillStyle='#00ff66'; ctx.beginPath();
+  ctx.arc(tx(PLAYER.x),ty(PLAYER.y),6,0,Math.PI*2); ctx.fill();
+}
+
+// ── Load map image then render ─────────────────────────────────────────────
+const row=document.getElementById('row');
+const panels=[
+  {label:'BEFORE', sub:'tables cast hard shadows (old bug)', shadowTables:true},
+  {label:'AFTER',  sub:'tables transparent to vision (original AU)', shadowTables:false},
+];
+
+// Pre-create canvases
+const canvases=[];
+for(const p of panels){
+  const div=document.createElement('div'); div.className='panel';
+  const lbl=document.createElement('div'); lbl.className='label'; lbl.textContent=p.label;
+  const sub=document.createElement('div'); sub.className='sub'; sub.textContent=p.sub;
+  const c=document.createElement('canvas'); c.width=CW; c.height=CH;
+  div.appendChild(lbl); div.appendChild(sub); div.appendChild(c);
+  row.appendChild(div);
+  canvases.push({canvas:c, shadowTables:p.shadowTables});
+}
+
+// Try to load the real map bg; fall back to a solid grey if CORS blocks it
+const img=new Image();
+img.onload=()=>{ for(const {canvas,shadowTables} of canvases) drawPanel(canvas,shadowTables,img); };
+img.onerror=()=>{ for(const {canvas,shadowTables} of canvases) drawPanel(canvas,shadowTables,null); };
+img.src='/Assets/Maps/map2back.png';
+</script>
+</body>
+</html>
