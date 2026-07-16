@@ -49,6 +49,34 @@ const NO_OF_MISSIONS = 8;
 const SPAWN_X = 4528;
 const SPAWN_Y = 1712;
 
+// ── Vent system ───────────────────────────────────────────────────────────────
+// Mirror of the client's INTERACT_RADIUS from settings.ts.  A player must be
+// this many world units from the vent centre (± a small tolerance for network
+// lag) to be allowed to enter it.  Using 1.5× gives fair lag tolerance while
+// still preventing remote-teleport cheats.
+const VENT_ENTRY_MAX_DIST = 180; // 1.5 × INTERACT_RADIUS (120)
+
+// Mirror of the client's VENT_NETWORK — must stay in sync with GameScene.ts.
+// Each vent id maps to its directly connected vent ids.
+const VENT_NETWORK: Record<number, number[]> = {
+  // Network A: Cafeteria ↔ Medbay ↔ Upper Engine
+  66: [72, 73], 72: [66, 73], 73: [66, 72],
+  // Network B: Reactor × 2 ↔ Security ↔ Electrical
+  76: [77], 77: [76, 75], 75: [77, 738], 738: [75],
+  // Network C: Lower Engine ↔ Storage ↔ Admin
+  74: [71], 71: [74, 407], 407: [71],
+  // Network D: Weapons ↔ Navigation ↔ Cockpit × 2
+  67: [68], 68: [67, 69], 69: [68, 70], 70: [69],
+};
+
+// Vent world-space centres (from map.tmx) — used to teleport player on travel.
+const VENT_POSITIONS: Record<number, { x: number; y: number }> = {
+  66: { x: 3929, y: 863 },  72: { x: 2152, y: 1327 }, 73: { x: 1618, y: 527 },
+  76: { x:  962, y: 1695 }, 77: { x:  832, y: 1230 }, 75: { x: 1923, y: 1654 }, 738: { x: 2252, y: 1786 },
+  74: { x: 1616, y: 2475 }, 71: { x: 4557, y: 2535 }, 407: { x: 3724, y: 2015 },
+  67: { x: 4475, y:  435 }, 68: { x: 4542, y: 1602 }, 69: { x: 5334, y: 1213 }, 70: { x: 5335, y: 1595 },
+};
+
 function dist(ax: number, ay: number, bx: number, by: number) {
   return Math.sqrt((ax - bx) ** 2 + (ay - by) ** 2);
 }
@@ -91,6 +119,9 @@ export class AmongGasRoom extends Room {
     this.onMessage('CHAT_SEND',   (client, msg) => this.handleChat(client, msg));
     this.onMessage('SABOTAGE',      (client, msg) => this.handleSabotage(client, msg));
     this.onMessage('SABOTAGE_FIX',  (client)      => this.handleSabotageFix(client));
+    this.onMessage('ENTER_VENT',    (client, msg) => this.handleEnterVent(client, msg));
+    this.onMessage('TRAVEL_VENT',   (client, msg) => this.handleTravelVent(client, msg));
+    this.onMessage('EXIT_VENT',     (client)      => this.handleExitVent(client));
 
     console.log(`[AmongGasRoom] ${this.roomId} created`);
   }
@@ -211,6 +242,9 @@ export class AmongGasRoom extends Room {
   }
 
   private handleMove(client: Client, msg: { x: number; y: number; anim: string }) {
+    // Players inside a vent cannot move — their position is locked to the vent.
+    const vp = this.state.players.get(client.sessionId);
+    if (vp?.inVent) return;
     if (this.state.phase !== 'GAME') return;
     const p = this.state.players.get(client.sessionId);
     if (!p?.isAlive) return;
@@ -502,6 +536,97 @@ export class AmongGasRoom extends Room {
     this.state.winner = winner;
     this.broadcast('GAME_OVER', { winner, impostorId: this.impostorSid });
     console.log(`[AmongGasRoom] ${this.roomId} — ${winner} wins`);
+  }
+
+  // ─── Vent handlers ────────────────────────────────────────────────────────
+
+  /**
+   * Impostor-only: enters the vent at ventId.
+   * Sets inVent=true on the schema (other clients hide the sprite) and
+   * broadcasts PLAYER_VENT so clients can play the vent-enter animation.
+   */
+  private handleEnterVent(client: Client, msg: { ventId?: number }) {
+    if (this.state.phase !== 'GAME') return;
+    if (client.sessionId !== this.impostorSid)
+      return client.send('ERROR', { code: 'NOT_IMPOSTOR' });
+
+    const p = this.state.players.get(client.sessionId);
+    if (!p?.isAlive) return;
+
+    const ventId = Number(msg?.ventId);
+    if (!(ventId in VENT_NETWORK)) return client.send('ERROR', { code: 'INVALID_VENT' });
+
+    // Server-side proximity check — reject if the player is too far from the
+    // vent they claim to be entering.  This prevents a modified client from
+    // instantly teleporting to any vent on the map by forging an ENTER_VENT
+    // message from an arbitrary position.
+    const pos = VENT_POSITIONS[ventId];
+    if (!pos) return client.send('ERROR', { code: 'INVALID_VENT' });
+    const dist = Math.hypot(p.x - pos.x, p.y - pos.y);
+    if (dist > VENT_ENTRY_MAX_DIST) {
+      return client.send('ERROR', { code: 'TOO_FAR_FROM_VENT' });
+    }
+
+    // Snap player position to the vent centre so server state is canonical
+    p.x = pos.x;
+    p.y = pos.y;
+    p.inVent = true;
+
+    this.broadcast('PLAYER_VENT', { sessionId: client.sessionId, ventId }, { except: client });
+  }
+
+  /**
+   * Impostor travels from their current vent to an adjacent one.
+   * Updates the player's world position (so admin table / reconnect is sane)
+   * and broadcasts the teleport to all other clients.
+   */
+  private handleTravelVent(client: Client, msg: { ventId?: number }) {
+    if (this.state.phase !== 'GAME') return;
+    if (client.sessionId !== this.impostorSid)
+      return client.send('ERROR', { code: 'NOT_IMPOSTOR' });
+
+    const p = this.state.players.get(client.sessionId);
+    if (!p?.isAlive || !p.inVent) return;
+
+    const toId = Number(msg?.ventId);
+    // Validate connectivity: server re-checks adjacency so clients can't cheat
+    const fromId = this.currentVentId(client.sessionId);
+    if (fromId === -1) return;
+    const neighbours = VENT_NETWORK[fromId] ?? [];
+    if (!neighbours.includes(toId)) return client.send('ERROR', { code: 'NOT_CONNECTED' });
+
+    const pos = VENT_POSITIONS[toId];
+    if (pos) { p.x = pos.x; p.y = pos.y; }
+
+    this.broadcast('PLAYER_TRAVEL_VENT', { sessionId: client.sessionId, ventId: toId }, { except: client });
+  }
+
+  /**
+   * Impostor exits the vent at the current position — becomes visible again.
+   */
+  private handleExitVent(client: Client) {
+    if (this.state.phase !== 'GAME') return;
+    if (client.sessionId !== this.impostorSid)
+      return client.send('ERROR', { code: 'NOT_IMPOSTOR' });
+
+    const p = this.state.players.get(client.sessionId);
+    if (!p?.isAlive) return;
+
+    p.inVent = false;
+    this.broadcast('PLAYER_EXIT_VENT', { sessionId: client.sessionId }, { except: client });
+  }
+
+  /**
+   * Looks up which vent the impostor is currently inside based on their
+   * snapped world position — used to validate TRAVEL_VENT adjacency.
+   */
+  private currentVentId(sessionId: string): number {
+    const p = this.state.players.get(sessionId);
+    if (!p) return -1;
+    for (const [id, pos] of Object.entries(VENT_POSITIONS)) {
+      if (Math.abs(p.x - pos.x) < 10 && Math.abs(p.y - pos.y) < 10) return Number(id);
+    }
+    return -1;
   }
 
   // ─── Helpers ──────────────────────────────────────────────────────────────

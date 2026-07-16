@@ -64,6 +64,17 @@ export class RemotePlayer extends Phaser.GameObjects.Sprite {
     if (!alive && this.scene.textures.exists(deadKey)) this.setTexture(deadKey);
   }
 
+  /**
+   * Hides/shows the remote player while they are inside a vent.
+   * In the original Among Us, nearby players CAN see someone enter/exit a
+   * vent — that's a valid way to catch impostors.  We fade to invisible
+   * (alpha 0) so the sprite is gone from view but kept alive in the scene.
+   */
+  setInVent(inVent: boolean) {
+    this.setVisible(!inVent);
+    this.nameLabel.setVisible(!inVent && this.isAlive);
+  }
+
   /** Called every frame from GameScene.update() — same convention as Bot.update(delta). */
   update(_delta: number) {
     this.x = Phaser.Math.Linear(this.x, this.targetX, 0.25);

@@ -11,6 +11,12 @@ export class PlayerState extends Schema {
   @type('string') anim = 'red_down_1';
   @type('boolean') isAlive = true;
   @type('boolean') hasVoted = false;
+  // inVent: true while an impostor is inside a vent tunnel.
+  // Broadcast in schema so the admin table and other clients can react
+  // (disappear sprite, hide from admin dots). Crewmates seeing this
+  // in the raw schema is intentional — just like real Among Us where
+  // nearby players CAN visually see someone vent.
+  @type('boolean') inVent = false;
   // isImpostor is NOT in schema — sent privately via client.send('YOU_ARE_IMPOSTOR')
   // so non-impostor clients never see it, with no need for @filter()
 }

@@ -60,6 +60,32 @@ const SHORT_TASK_NAMES: Record<string, string> = {
   clear_asteroids: 'Clear Asteroids',
 };
 
+// ── Vent system ──────────────────────────────────────────────────────────────
+// Vent network adjacency: each TMX vent object id maps to the ids it connects
+// to.  Networks are isolated groups — you can only travel within a group.
+//   Network A (top triangle): Cafeteria ↔ Medbay ↔ Upper Engine
+//   Network B (left chain):   Reactor × 2 ↔ Security ↔ Electrical
+//   Network C (bottom chain): Lower Engine ↔ Storage ↔ Admin
+//   Network D (right chain):  Weapons ↔ Navigation ↔ Cockpit × 2
+const VENT_NETWORK: Record<number, number[]> = {
+  // A
+  66: [72, 73], 72: [66, 73], 73: [66, 72],
+  // B
+  76: [77], 77: [76, 75], 75: [77, 738], 738: [75],
+  // C
+  74: [71], 71: [74, 407], 407: [71],
+  // D
+  67: [68], 68: [67, 69], 69: [68, 70], 70: [69],
+};
+
+/** Human-readable label shown in the vent travel UI for each vent id. */
+const VENT_ROOM_NAMES: Record<number, string> = {
+  66: 'Cafeteria',   72: 'Medbay',        73: 'Upper Engine',
+  76: 'Reactor',     77: 'Reactor (2)',   75: 'Security',   738: 'Electrical',
+  74: 'Lower Engine',71: 'Storage',       407: 'Admin',
+  67: 'Weapons',     68: 'Navigation',    69: 'Cockpit',     70: 'Cockpit (2)',
+};
+
 /** Display-friendly room names for the AMBIENT_CENTRES keys, used to prefix task-list rows ("Room: Task"), matching the original game's list format. */
 const ROOM_DISPLAY_NAMES: Record<string, string> = {
   cafeteria:       'Cafeteria',
@@ -216,6 +242,25 @@ export class GameScene extends Phaser.Scene {
   private nearbyTask: TaskDef | null = null;
   private nearbyCorpse: Bot | null = null;
 
+  // --- vent system ---
+  // ventData: positions of all vent objects parsed from the TMX map.
+  private ventData: { id: number; x: number; y: number }[] = [];
+  // Vent id of the vent the impostor is currently inside (-1 = not venting).
+  private currentVentId = -1;
+  // Vent id currently in proximity range (-1 = none nearby).
+  private nearbyVentId = -1;
+  // Whether the local player is currently inside a vent.
+  public isInVent = false;
+  // The vent-travel overlay shown while inside a vent.
+  private ventOverlay?: Phaser.GameObjects.Container;
+  // The HUD button that appears when an impostor stands near a vent.
+  private ventBtn?: Phaser.GameObjects.Container;
+
+  // --- admin table ---
+  // World-space centres of admin_btn1 and admin_btn2 from the TMX.
+  private adminBtnPositions: { x: number; y: number }[] = [];
+  private nearbyAdminBtn = false;
+
   // --- multiplayer (Phase 2: Position Sync) ---
   // True when this GameScene was launched from LobbyScene (registry
   // gameMode === 'online'). Bots/local win-checking are skipped in this
@@ -275,6 +320,24 @@ export class GameScene extends Phaser.Scene {
 
     // ── Item sprites ──
     this.placeItemSprites(mapObjs);
+
+    // ── Vent positions (impostor-only interactive objects) ──
+    // Stored as world-space centres so detectNearby can do simple distance checks.
+    this.ventData = mapObjs
+      .filter(o => o.name === 'vent' || o.name === 'ventilation')
+      .map(o => ({ id: o.id, x: o.x + o.width / 2, y: o.y + o.height / 2 }));
+
+    // ── Admin button positions (any player can open the admin table) ──
+    this.adminBtnPositions = mapObjs
+      .filter(o => o.name === 'admin_btn1' || o.name === 'admin_btn2')
+      .map(o => ({ x: o.x + o.width / 2, y: o.y + o.height / 2 }));
+
+    // Reset vent state for scene restarts
+    this.isInVent = false;
+    this.currentVentId = -1;
+    this.nearbyVentId = -1;
+    this.nearbyAdminBtn = false;
+    this.ventOverlay = undefined;
 
     // ── Bots ── (Freeplay only — multiplayer uses real remote players instead)
     if (!this.isMultiplayer) {
@@ -430,6 +493,9 @@ export class GameScene extends Phaser.Scene {
     // Corner buttons
     this.emergencyBtn?.setPosition(EMERGENCY_BTN_W / 2 + 12, EMERGENCY_BTN_H / 2 + 56 + st);
     this.miniMapBtn?.setPosition(W - 52, 52 + st);
+
+    // Vent button (same slot as REPORT)
+    this.ventBtn?.setPosition(actionX, H - 260 - sb);
   }
 
   // ────────────────── Tasks ──────────────────
@@ -638,6 +704,16 @@ export class GameScene extends Phaser.Scene {
     if (this.isMultiplayer && this.player.isImpostor) {
       this.sabotageBtn = this.buildImageButton(actionX, H - 520 - sb, 'ui_sabotage_icon', 72, 72, () => this.toggleSabotageMenu());
       this.buildSabotageMenu(actionX, H - 520 - sb);
+    }
+
+    // Vent button — impostor-only, shows when near a vent.
+    // Sits in the REPORT slot (H-260) and replaces REPORT while visible
+    // (impostors are rarely near both a dead body and a vent entrance).
+    if (this.player.isImpostor) {
+      this.ventBtn = this.buildActionButton(
+        actionX, H - 260 - sb, 58, 0xaa44ff, '🌀', 'VENT', () => this.enterVent(),
+      );
+      this.ventBtn.setVisible(false);
     }
 
     // Sabotage banner — top-of-screen alert shown to everyone while a
@@ -1188,6 +1264,13 @@ export class GameScene extends Phaser.Scene {
         return;
       }
     }
+    if (this.ventBtn?.visible) {
+      const vy = H - 260 - sb;
+      if (Phaser.Math.Distance.Between(px, py, actionX, vy) < tapR) {
+        this.enterVent();
+        return;
+      }
+    }
     if (this.sabotageBtn?.visible) {
       const sy = H - 520 - sb;
       if (Phaser.Math.Distance.Between(px, py, actionX, sy) < tapR) {
@@ -1226,8 +1309,12 @@ export class GameScene extends Phaser.Scene {
       if (img.texture.key !== key) img.setTexture(key);
     }
 
-    // Player
-    this.player.update(this.cursors, this.wasd, delta, this.joystickForce);
+    // Player — freeze movement while inside a vent
+    if (!this.isInVent) {
+      this.player.update(this.cursors, this.wasd, delta, this.joystickForce);
+    } else {
+      this.player.setVelocity(0, 0); // ensure physics doesn't drift
+    }
 
     // Fog of war is rendered via uiCamera 'prerender' hook in renderFogCanvas()
 
@@ -1318,6 +1405,8 @@ export class GameScene extends Phaser.Scene {
         rp.setTarget(player.x, player.y);
         rp.setFrameKey(player.anim);
         rp.setAlive(player.isAlive);
+        // Hide remote player while they're inside a vent tunnel
+        rp.setInVent((player as unknown as { inVent?: boolean }).inVent ?? false);
       });
     }, true);
 
@@ -1344,6 +1433,8 @@ export class GameScene extends Phaser.Scene {
     });
 
     room.onMessage('MEETING_STARTED', (msg: { callerId: string; reason: 'emergency' | 'report' }) => {
+      // Boot the impostor from the vent before the meeting UI opens
+      if (this.isInVent) this.exitVent();
       if (this.gameOver) return;
       this.emergencyCooldown = 45_000;
       this.meetings++;
@@ -1552,16 +1643,38 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
-    // Prompt
+    // Vent proximity (impostor only, not while already inside a vent)
+    this.nearbyVentId = -1;
+    if (this.player.isImpostor && !this.isInVent) {
+      for (const v of this.ventData) {
+        if (Phaser.Math.Distance.Between(px, py, v.x, v.y) < INTERACT_RADIUS) {
+          this.nearbyVentId = v.id;
+          break;
+        }
+      }
+    }
+
+    // Admin button proximity (any alive player)
+    this.nearbyAdminBtn = false;
+    for (const ab of this.adminBtnPositions) {
+      if (Phaser.Math.Distance.Between(px, py, ab.x, ab.y) < INTERACT_RADIUS) {
+        this.nearbyAdminBtn = true;
+        break;
+      }
+    }
+
+    // Prompt (priority: task > sabotage fix > emergency > admin > vent > report)
     const nearEmergency = eDist < INTERACT_RADIUS * 1.5 && this.player.isAlive;
     if (this.nearbyTask) {
-      this.interactPrompt
-        .setText(`[E] ${this.nearbyTask.title}`)
-        .setVisible(true);
+      this.interactPrompt.setText(`[E] ${this.nearbyTask.title}`).setVisible(true);
     } else if (this.nearSabotagePanel) {
       this.interactPrompt.setText(`[E] Fix ${SABOTAGE_LABELS[this.sabotageType as keyof typeof SABOTAGE_LABELS]}`).setVisible(true);
     } else if (nearEmergency) {
       this.interactPrompt.setText('[E] Emergency Meeting').setVisible(true);
+    } else if (this.nearbyAdminBtn) {
+      this.interactPrompt.setText('[E] Admin Table').setVisible(true);
+    } else if (this.nearbyVentId !== -1) {
+      this.interactPrompt.setText('[E] Use Vent').setVisible(true);
     } else if (this.nearbyCorpse) {
       this.interactPrompt.setText('[R] Report Body').setVisible(true);
     } else {
@@ -1570,7 +1683,10 @@ export class GameScene extends Phaser.Scene {
 
     // Contextual action buttons — only show the ones that are actionable
     // right now, so the bottom-right thumb zone doesn't clutter the screen.
-    this.useBtn.setVisible(!!this.nearbyTask || this.nearSabotagePanel || nearEmergency);
+    this.useBtn.setVisible(!!this.nearbyTask || this.nearSabotagePanel || nearEmergency || this.nearbyAdminBtn);
+
+    // Vent button: impostor only, near a vent, not currently inside one
+    this.ventBtn?.setVisible(this.nearbyVentId !== -1 && !this.isInVent);
 
     if (this.isMultiplayer) {
       // In multiplayer: report shows when near a dead remote player's body
@@ -1582,7 +1698,8 @@ export class GameScene extends Phaser.Scene {
           break;
         }
       }
-      this.reportBtn.setVisible(nearDeadRemote);
+      // Hide REPORT when the vent button is visible (they can't both be needed at once)
+      this.reportBtn.setVisible(nearDeadRemote && !this.ventBtn?.visible);
 
       // Kill button: only for the impostor, when a living remote player is in range
       if (this.player.isImpostor && this.player.isAlive) {
@@ -1616,6 +1733,19 @@ export class GameScene extends Phaser.Scene {
     if (this.nearSabotagePanel) {
       if (this.isMultiplayer) NetworkManager.room?.send('SABOTAGE_FIX');
       else this.fixSabotageLocal();
+      return;
+    }
+
+    // Admin table (any alive player)
+    if (this.nearbyAdminBtn) {
+      this.scene.pause();
+      this.scene.launch('AdminTableScene', { gameScene: this, isMultiplayer: this.isMultiplayer });
+      return;
+    }
+
+    // Vent entry (impostor only)
+    if (this.nearbyVentId !== -1 && this.player.isImpostor) {
+      this.enterVent();
       return;
     }
 
@@ -2049,6 +2179,134 @@ export class GameScene extends Phaser.Scene {
     this.killBtn.setVisible(false);
   }
 
+  // ────────────────── Vent System (impostor) ──────────────────
+
+  /**
+   * Called when the impostor presses the VENT button while standing near a
+   * vent entrance.  Hides the player, disables physics movement, plays the
+   * vent sound, and opens the vent-travel overlay.
+   *
+   * Original Among Us behaviour: nearby players CAN see the enter/exit
+   * animation — that's how you catch impostors.  We broadcast the event in
+   * multiplayer so other clients can react (their RemotePlayer goes invisible).
+   */
+  private enterVent() {
+    if (this.isInVent || this.nearbyVentId === -1 || !this.player.isImpostor) return;
+    this.isInVent = true;
+    this.currentVentId = this.nearbyVentId;
+
+    // Hide player sprite; physics body stays enabled so collision state is
+    // consistent, but velocity is zeroed so the player can't move while venting.
+    this.player.setAlpha(0);
+    this.player.setVelocity(0, 0);
+
+    this.sound.play('sfx_vent', { volume: 0.7 });
+    this.showVentOverlay();
+
+    if (this.isMultiplayer) {
+      NetworkManager.room?.send('ENTER_VENT', { ventId: this.currentVentId });
+    }
+  }
+
+  /**
+   * Builds (or rebuilds) the vent-travel overlay displayed while the player
+   * is inside a vent.  Shows one button per connected vent plus an Exit button.
+   * Runs on the UI camera so it's always fullscreen regardless of world zoom.
+   */
+  private showVentOverlay() {
+    this.ventOverlay?.destroy();
+    const { width: W, height: H } = this.scale;
+    const connected = VENT_NETWORK[this.currentVentId] ?? [];
+
+    const items: Phaser.GameObjects.GameObject[] = [];
+    const rowH = 60, gap = 8;
+    const totalRows = connected.length + 1; // connections + exit
+    const panH = 52 + totalRows * (rowH + gap);
+
+    const bg = this.add.rectangle(0, 0, W * 0.80, panH, 0x14002a, 0.95)
+      .setStrokeStyle(2, 0xaa44ff, 0.95);
+    items.push(bg);
+
+    const title = this.add.text(0, -panH / 2 + 20, '🌀  Vent System', {
+      fontSize: '20px', color: '#cc88ff', fontFamily: 'Arial', fontStyle: 'bold',
+      stroke: '#000', strokeThickness: 3,
+    }).setOrigin(0.5, 0);
+    items.push(title);
+
+    connected.forEach((ventId, i) => {
+      const rowY = -panH / 2 + 52 + i * (rowH + gap) + rowH / 2;
+      const label = VENT_ROOM_NAMES[ventId] ?? `Vent ${ventId}`;
+      const btnBg = this.add.rectangle(0, rowY, W * 0.65, rowH, 0x440088, 0.9)
+        .setStrokeStyle(1.5, 0xcc66ff, 0.9)
+        .setInteractive({ useHandCursor: true })
+        .on('pointerdown', () => this.travelVent(ventId));
+      const btnTxt = this.add.text(0, rowY, `Travel → ${label}`, {
+        fontSize: '17px', color: '#fff', fontFamily: 'Arial', fontStyle: 'bold',
+        stroke: '#000', strokeThickness: 2,
+      }).setOrigin(0.5);
+      items.push(btnBg, btnTxt);
+    });
+
+    const exitY = -panH / 2 + 52 + connected.length * (rowH + gap) + rowH / 2;
+    const exitBg = this.add.rectangle(0, exitY, W * 0.50, rowH, 0x2a2a2a, 0.9)
+      .setStrokeStyle(1.5, 0xaaaaaa, 0.7)
+      .setInteractive({ useHandCursor: true })
+      .on('pointerdown', () => this.exitVent());
+    const exitTxt = this.add.text(0, exitY, 'Exit Vent', {
+      fontSize: '17px', color: '#ccc', fontFamily: 'Arial',
+      stroke: '#000', strokeThickness: 2,
+    }).setOrigin(0.5);
+    items.push(exitBg, exitTxt);
+
+    this.ventOverlay = this.add.container(W / 2, H / 2, items)
+      .setScrollFactor(0).setDepth(200);
+    this.cameras.main.ignore(this.ventOverlay);
+  }
+
+  /**
+   * Teleports the impostor to a connected vent.  The player remains hidden
+   * (alpha 0) and the camera follows instantly because the camera is set to
+   * follow the player sprite which we just repositioned.
+   */
+  private travelVent(toVentId: number) {
+    const connections = VENT_NETWORK[this.currentVentId] ?? [];
+    if (!connections.includes(toVentId)) return; // not connected — guard
+
+    const target = this.ventData.find(v => v.id === toVentId);
+    if (!target) return;
+
+    this.player.setPosition(target.x, target.y);
+    this.currentVentId = toVentId;
+
+    this.sound.play('sfx_vent', { volume: 0.5 });
+    this.showVentOverlay(); // rebuild with new vent's connection list
+
+    if (this.isMultiplayer) {
+      NetworkManager.room?.send('TRAVEL_VENT', { ventId: toVentId });
+    }
+  }
+
+  /**
+   * Exits the current vent: makes the player visible again, re-enables
+   * movement, and removes the travel overlay.
+   */
+  private exitVent() {
+    if (!this.isInVent) return;
+    this.isInVent = false;
+    this.currentVentId = -1;
+
+    this.player.setAlpha(1);
+
+    this.ventOverlay?.destroy();
+    this.ventOverlay = undefined;
+
+    this.sound.play('sfx_vent', { volume: 0.7 });
+
+    if (this.isMultiplayer) {
+      NetworkManager.room?.send('EXIT_VENT', {});
+    }
+  }
+
   // ────────────────── Win Conditions ──────────────────
 
   private botCheckTasks() {
@@ -2246,6 +2504,12 @@ export class GameScene extends Phaser.Scene {
       this.sound.stopByKey(`amb_${key}`);
     }
     this.ambientPlaying.clear();
+
+    // Clean up vent overlay if player quits while venting
+    this.ventOverlay?.destroy();
+    this.ventOverlay = undefined;
+    this.isInVent = false;
+    this.currentVentId = -1;
 
     // Detach the fog canvas hook (prevents stale draws after scene restart)
     this.uiCamera?.off('prerender', this.renderFogCanvas, this);

@@ -167,8 +167,30 @@ Tests: lobby join/leave, crew win (4/8/15 players), impostor win via kills (4 pl
 2. Update `VITE_BOT_USERNAME` Replit env var to the real bot username
 3. Deploy
 
+### Vent system (impostors)
+Impostors can enter, travel through, and exit vent networks. 14 vents across 4 isolated networks:
+- **A**: Cafeteria ↔ Medbay ↔ Upper Engine (triangle — all three connect)
+- **B**: Reactor ↔ Reactor(2) ↔ Security ↔ Electrical (chain)
+- **C**: Lower Engine ↔ Storage ↔ Admin (chain)
+- **D**: Weapons ↔ Navigation ↔ Cockpit ↔ Cockpit(2) (chain)
+
+Client files: `src/scenes/GameScene.ts` (`enterVent`, `showVentOverlay`, `travelVent`, `exitVent`), `VENT_NETWORK` / `VENT_ROOM_NAMES` constants at top of GameScene.ts.
+Server files: `server/rooms/AmongGasRoom.ts` — `ENTER_VENT`, `TRAVEL_VENT`, `EXIT_VENT` handlers; `VENT_NETWORK` / `VENT_POSITIONS` constants. `inVent` boolean added to `PlayerState` schema.
+
+**UX**: A purple 🌀 VENT button appears when the impostor stands within `INTERACT_RADIUS` of a vent. While venting, a popup shows connected-vent options plus an Exit button. Player sprite is hidden (alpha 0); remote players' sprites also hidden via `RemotePlayer.setInVent()`. Meeting start auto-exits the vent. Movement is blocked server-side while `inVent=true`.
+
+### Admin Table
+`src/scenes/AdminTableScene.ts` — overlay launched (not started) over GameScene. Shows the minimap PNG with one coloured dot per player at their current room's centre position. Dead players: grey ✕. Players in vents: hidden. Freeplay reads `gameScene.player` + `gameScene.bots`; multiplayer reads `NetworkManager.room.state.players`.
+
+Trigger: walk near `admin_btn1` or `admin_btn2` objects in the TMX (both near the Admin room, ~x3820–4070, y~1804–1807) and press E / tap the USE button.
+
+### Fog of war — verification results
+206 wall/table rects cover the full map (x 581→5753, y 13→2933). Key rooms all have wall coverage: Reactor 24 rects, Cockpit 20, Weapons 19, Storage 20, Electrical 8. The ray-cast shadow system is architecturally correct at all rooms (see `.agents/memory/fog-of-war.md` for implementation notes).
+
 ### What's NOT done yet
 - `MeetingScene.ts` — still landscape layout; needs single-column portrait reflow for mobile
 - Task mini-scenes — not yet resized/repositioned for portrait touch
 - Telegram `viewportChanged` event not wired (safe-area insets read once at boot only)
 - Two-tab manual smoke test — all events verified by headless test but not yet visually confirmed across two real browser tabs
+- Vent: impostor bot AI does not use vents (only human impostors in multiplayer can vent)
+- Admin Table: dots from multiple players in the same room slightly overlap (no stack offset)

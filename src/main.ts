@@ -14,6 +14,7 @@ import { AlignEngineScene } from './scenes/tasks/AlignEngineScene';
 import { EmptyGarbageScene } from './scenes/tasks/EmptyGarbageScene';
 import { ClearAsteroidsScene } from './scenes/tasks/ClearAsteroidsScene';
 import { LobbyScene } from './scenes/LobbyScene';
+import { AdminTableScene } from './scenes/AdminTableScene';
 
 // The game keeps its original fixed 750x1334 internal design resolution —
 // every HUD/text/icon size in the game was hand-tuned in literal pixels
@@ -63,6 +64,7 @@ const config: Phaser.Types.Core.GameConfig = {
     EmptyGarbageScene,
     ClearAsteroidsScene,
     LobbyScene,
+    AdminTableScene,
   ],
   audio: {
     disableWebAudio: false,
