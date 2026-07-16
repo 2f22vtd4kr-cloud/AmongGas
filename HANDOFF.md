@@ -273,13 +273,8 @@ Phase 4 code is wired and TypeScript-clean. To activate it in production:
 
 **Fog of war (added — `src/scenes/GameScene.ts`, `src/settings.ts`):**
 - `CREW_VISION = 200` world units (~290 px at zoom 1.45), `IMP_VISION = 280` world units (~406 px).
-- Two-layer `GeometryMask invertAlpha=true` approach (works Canvas + WebGL):
-  - `fogInner` (alpha 0.92, radius = baseR) — main darkness
-  - `fogOuter` (alpha 0.40, radius = baseR × 1.4) — soft-edge transition zone
-- `setupFog()` called from `create()` after `setupUiCamera()`. `updateFog()` called each frame after `player.update()`.
-- Ghosts see full map: both layers hidden when `!player.isAlive`.
-- Mask graphics use `this.add.graphics().setVisible(false)` — GeometryMask reads path data regardless of visibility; the `{ add: false }` option was removed from Phaser 3.90 typings.
-- `uiCamera.ignore()` called on both fog layers + both mask graphics so the HUD renders above fog.
+- Initial implementation used a two-layer `GeometryMask invertAlpha=true` approach. **Replaced in Session 14** with a native Canvas 2D offscreen composite that supports smooth radial gradients and hard wall shadows via a visibility polygon.
+- Ghosts see full map (fog skipped entirely when `!player.isAlive`).
 
 **Original-vs-clone gap analysis (see §9):**
 - Documented all ✅ / ❌ / ⚠️ gaps vs original Among Us.
@@ -306,18 +301,42 @@ Tests run against the live Colyseus server with real `@colyseus/sdk` WebSocket c
 
 **All 67/67 checks pass.**
 
+### Session 14 (2026-07-16) — Fog of war rewrite + correctness fixes + Room name label
+
+**Fog of war — rewritten to native Canvas 2D offscreen composite:**
+- Replaced the GeometryMask approach with a 4-step offscreen canvas technique hooked into `uiCamera.prerender`:
+  1. Fill offscreen canvas with near-opaque darkness (`rgba(10,10,10,0.96)`)
+  2. `destination-out` radial gradient punches a soft disc of light at the player (opaque 0→60 % of `visionR×1.2`, fades to transparent at `visionR×1.2`)
+  3. `source-over` even-odd fill re-darkens wall-shadow areas (path = full-canvas rect + visibility polygon)
+  4. `gameCtx.save()` / `drawImage(fogCanvas)` / `gameCtx.restore()` blits result onto the live Phaser canvas
+- Motivation: GeometryMask is binary (no gradient) and `{ add: false }` was removed from Phaser 3.90 typings.
+
+**Fog of war — correctness fixes applied this session:**
+- **Polygon radius = visionR × 1.2** (critical): if the polygon only extends to `visionR`, the even-odd step-3 fill re-darkens the gradient's soft-falloff zone in open areas, producing a hard circle instead of a smooth fade. Matching the polygon boundary to the gradient's outer edge (`visionR×1.2`) preserves the soft edge. Wall shadows inside `visionR` still have hard edges (their vertices sit at actual wall hit-distance, not the 1.2× limit).
+- **64 boundary rays** (up from 24): chord deviation drops from ~2.5 px to ~0.3 px at r=200 — polygon facets invisible on screen.
+- **`gameCtx` save/restore**: explicit `setTransform(identity)` and `globalCompositeOperation = 'source-over'` before blitting, then `restore()`, so Phaser's canvas state is never mutated between frames.
+- `public/fog_game.html` and `public/fog_test.html` updated to match (side-by-side NEW vs OLD demo with Reactor critical-case scenario).
+- Visibility polygon algorithm (`src/utils/visibility.ts`): unchanged from prior session — `circleSegIntersectAngles()` handles walls whose corners are all outside the vision radius (the "Reactor case" that motivated the rewrite).
+
+**Room name label (added — matches original Among Us HUD):**
+- White bold 30 px text at `W/2, H − 48 − safeBot`, added to `this.hud` container (rendered by uiCamera above fog).
+- `updateRoomLabel()` called each frame from `update()`: iterates `AMBIENT_CENTRES`, checks player distance ≤ `centre.radius`. Shows room display name (e.g. "O2", "Cafeteria") when inside a room zone; hidden in corridors/hallways between rooms — exactly matching the original game.
+- 13 named rooms covered: Cafeteria, Medbay, Security, Reactor, Upper Engine, Lower Engine, Electrical, Storage, Admin, Communications, Oxygen, Cockpit, Weapons.
+- Key files: `src/scenes/GameScene.ts` — `buildHUD()`, `updateRoomLabel()`, `update()`.
+
 ### Next Session Priorities
 See §9 for the full original-vs-clone gap analysis. Implement in this order:
-1. **Fog of war** — ✅ DONE (Session 12)
+1. **Fog of war** — ✅ DONE (Sessions 12 + 14)
 2. **In-meeting chat** — ✅ DONE (Session 13)
-3. **Sabotage** — impostor has kill only; needs Lights / O2 / Reactor / Comms / Doors and the sabotage-win timer
-4. **Venting** — vent TMX objects placed; needs enter/exit interaction + network node graph
-5. **Admin map** — show coloured player-room dots on the admin table
-6. **Security cameras** — let players watch the camera feeds from the Security room
+3. **Sabotage** — ✅ DONE (Session 13+)
+4. **Room name label** — ✅ DONE (Session 14)
+5. **Venting** — vent TMX objects placed; needs enter/exit interaction + vent network node graph
+6. **Admin map** — show coloured player-room dots on the admin table
+7. **Security cameras** — let players watch the camera feeds from the Security room
 
 ---
 
-## 9. Original-vs-Clone Gap Analysis (as of Session 12)
+## 9. Original-vs-Clone Gap Analysis (as of Session 14)
 
 ### ✅ Implemented correctly
 | Feature | Notes |
@@ -331,15 +350,12 @@ See §9 for the full original-vs-clone gap analysis. Implement in this order:
 | Win conditions (task complete / impostor majority / eject all impostors) | Matches |
 | Ghost walks through walls | Matches |
 | Ghost can complete tasks (contributions count) | Matches — fixed Session 12 |
-| Fog of war (crew 200 wu, impostor 280 wu; ghosts see full map) | Matches — added Session 12 |
+| Fog of war (crew 200 wu, impostor 280 wu; ghosts see full map) | Matches — added Session 12, rewritten + corrected Session 14 |
 | Ambient room sounds, minimap, kill banner | Matches |
 | Multiplayer up to 15 players (Colyseus) | Matches |
 | In-meeting text chat (multiplayer, alive players only) | Matches (no Quick Chat presets, no separate ghost channel) — added Session 13 |
-
-### ✅ Implemented correctly (added later — this table was stale as of Session 13)
-| Feature | Notes |
-|---|---|
-| **Sabotage** (Lights/Comms/Doors/Reactor/O2) | Server-authoritative in multiplayer (`AmongGasRoom.handleSabotage`); client-driven bot AI in Freeplay (`GameScene.impostorSabotageAI`). Reactor/O2 unfixed → impostor wins, matching original. See `replit.md` § Sabotage. |
+| **Sabotage** (Lights/Comms/Doors/Reactor/O2) | Server-authoritative in multiplayer; client-driven bot AI in Freeplay. Reactor/O2 unfixed → impostor wins, matching original. |
+| **Room name label** (bottom-centre HUD) | Shows current room name (e.g. "O2") when inside a room zone; hidden in corridors — added Session 14 |
 
 ### ❌ Missing — high gameplay impact
 | Gap | What original does |
