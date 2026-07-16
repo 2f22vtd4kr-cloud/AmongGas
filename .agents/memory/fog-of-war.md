@@ -27,6 +27,9 @@ Wall shadows inside `visionR` still have hard edges because those polygon vertic
 - 64 boundary rays → chord deviation < 0.3 px at r=200, invisible. (24 → ~2.5 px, visible polygon facets.)
 - Circle-edge intersections fix the "Reactor case": a wide wall whose corners are all outside the vision radius but whose face crosses the circle. Without them the wall casts no shadow.
 
+## Table transparency (matches original Among Us)
+`TmxParser.ts` returns `{ walls, tables, objects }`. Only `walls` feed into `GameScene.wallRects` (the rect list passed to `computeVisibilityPolygon`). `tables` are added to the physics static group alongside walls so they block player movement, but they do **not** cast vision shadows — matching the original game's "List of transparent walls". Never merge these two arrays for shadow casting.
+
 ## Ghosts
 `if (!this.player.isAlive) return;` at the top of `renderFogCanvas` — ghosts skip fog entirely and see the full unoccluded map.
 

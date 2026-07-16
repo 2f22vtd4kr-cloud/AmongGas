@@ -19,7 +19,7 @@ src/
   main.ts              — Phaser game config + boot (LobbyScene included)
   settings.ts          — Game constants (speed, positions, CAMERA_ZOOM, etc.)
   types.ts             — Shared TypeScript interfaces
-  utils/TmxParser.ts   — Parses TMX map XML → collision rects + object list
+  utils/TmxParser.ts   — Parses TMX map XML → { walls, tables, objects } (tables separate so they block movement but NOT fog shadows)
   utils/imageFit.ts    — fitContain/fitCover helpers (aspect-ratio safe)
   network/
     NetworkManager.ts  — @colyseus/sdk Client, auto-detects Replit dev domain
@@ -114,7 +114,7 @@ Goal: adapt the desktop/landscape web port for mobile **portrait** play (Telegra
 
 ### Done
 - **Base resolution**: fixed portrait `750×1334` design resolution (`src/settings.ts` `WIDTH`/`HEIGHT`, `src/main.ts` Phaser config), `Scale.FIT` + `CENTER_BOTH`. Deliberately **not** changed to match real device pixels — every HUD element (fonts, icon sizes, button dimensions, camera zoom) is hand-tuned in literal pixels against this fixed resolution; changing the internal resolution breaks all of that sizing at once. Any future work must keep this constraint in mind.
-- **Camera zoom**: `CAMERA_ZOOM` constant in `src/settings.ts` (currently `1.45`) applied to the main camera in `GameScene.create()` for a tighter mobile framing.
+- **Camera zoom**: `CAMERA_ZOOM` constant in `src/settings.ts` (currently `0.75`) applied to the main camera in `GameScene.create()` for a wider field of view matching the original Among Us. Previously `1.45` — too zoomed in.
 - **Dual-camera HUD fix**: `setScrollFactor(0)` alone does not protect HUD objects from camera zoom/rotation in Phaser 3. Added a second unzoomed `uiCamera` (`GameScene.setupUiCamera()`) — main camera `.ignore()`s all HUD objects, `uiCamera` ignores everything else. Any HUD-layer object created dynamically later needs its own explicit `this.cameras.main.ignore(...)` call at creation time.
 - **HUD repositioning**: virtual joystick bottom-left; Emergency Meeting button top-left; Kill/Report/Use as circular touch-target buttons at bottom-left, contextually shown/hidden via `detectNearby()`. Mini-map button top-right.
 - **Image aspect-ratio bug fixed**: `src/utils/imageFit.ts` (`fitContain`/`fitCover`) applied across `MenuScene.ts`, `GameScene.ts`, `VictoryScene.ts`.
@@ -184,8 +184,13 @@ Server files: `server/rooms/AmongGasRoom.ts` — `ENTER_VENT`, `TRAVEL_VENT`, `E
 
 Trigger: walk near `admin_btn1` or `admin_btn2` objects in the TMX (both near the Admin room, ~x3820–4070, y~1804–1807) and press E / tap the USE button.
 
-### Fog of war — verification results
-206 wall/table rects cover the full map (x 581→5753, y 13→2933). Key rooms all have wall coverage: Reactor 24 rects, Cockpit 20, Weapons 19, Storage 20, Electrical 8. The ray-cast shadow system is architecturally correct at all rooms (see `.agents/memory/fog-of-war.md` for implementation notes).
+### Fog of war — implementation notes
+
+**Table transparency fix (session 2):** Cafeteria tables were incorrectly casting vision shadows. Fixed by splitting `TmxParser.ts` to return `{ walls, tables, objects }` — `walls` only feeds `GameScene.wallRects` (shadow casting), while both are included in the physics static group (movement blocking). This matches the original Among Us behaviour documented on the fandom wiki "List of transparent walls".
+
+**Visual debug tool:** `public/fog-demo.html` — loads the real map background and renders before/after fog comparison using the same Canvas 2D algorithm. Useful for verifying shadow behaviour without needing the full game to load.
+
+189 wall rects + 5 table rects cover the full map (x 581→5753, y 13→2933). Key rooms all have wall coverage: Reactor 24 rects, Cockpit 20, Weapons 19, Storage 20, Electrical 8. The ray-cast shadow system is architecturally correct at all rooms (see `.agents/memory/fog-of-war.md` for implementation notes).
 
 ### What's NOT done yet
 - `MeetingScene.ts` — still landscape layout; needs single-column portrait reflow for mobile
