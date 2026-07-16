@@ -1012,7 +1012,11 @@ export class GameScene extends Phaser.Scene {
     ctx.clearRect(0, 0, W, H);
 
     // ── Step 1: full-screen darkness ─────────────────────────────────────────
-    ctx.fillStyle = 'rgba(10,10,10,0.96)';
+    // Original AU uses ~55 % opacity so map geometry (floor tiles, table shapes)
+    // shows through the fog — matching the grey "unlit" look in the original.
+    // Wall-shadow areas get a second near-opaque pass in Step 3, so they stay
+    // nearly black even though the base fog is lighter.
+    ctx.fillStyle = 'rgba(10,10,10,0.55)';
     ctx.fillRect(0, 0, W, H);
 
     // ── Step 2: erase a soft disc of light at the player ─────────────────────

@@ -46,8 +46,8 @@ export const REPORT_RADIUS = 150;
 // Impostor default: ~280 world units → ~406 px at zoom 1.45 (wider awareness)
 // Ghosts see the full map (no fog).
 export const NIGHT_COLOR  = 0x141414;
-export const CREW_VISION  = 200;   // world units — crewmate sight radius
-export const IMP_VISION   = 280;   // world units — impostor sight radius
+export const CREW_VISION  = 340;   // world units — crewmate sight radius (~68 % of screen half-width at zoom 0.75, matching original AU 1× default)
+export const IMP_VISION   = 480;   // world units — impostor sight radius (~1.4× crew, nearly screen-filling)
 
 // Footstep rate (ms between steps)
 export const STEPPING_RATE = 230;
@@ -90,7 +90,7 @@ export const SABOTAGE_LABELS: Record<'lights' | 'comms' | 'reactor' | 'o2' | 'do
   doors:   'Doors',
 };
 // Crew vision radius while 'lights' is active (impostor vision is unaffected).
-export const CREW_VISION_SABOTAGED = 65;
+export const CREW_VISION_SABOTAGED = 85;  // ~17 % of screen half-width at zoom 0.75, matching the "barely see your feet" lights-off circle in the original
 
 // Task titles (from Python tasks.py)
 export const TASK_TITLES: Record<string, string> = {
