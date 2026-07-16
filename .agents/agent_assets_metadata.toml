@@ -1,0 +1,8 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "Sn0UTntLs92ZGPtllhXqs"
+uri = "file://sim/fog_debug.svg"
+type = "image"
+title = "Fog of War — visibility polygon debug (3 positions)"

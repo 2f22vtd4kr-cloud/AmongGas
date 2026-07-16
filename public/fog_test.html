@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Fog Debug — New vs Old</title>
+<style>
+  body { margin: 0; background: #1a0a2e; padding: 10px; }
+  .row { display: flex; gap: 10px; margin-bottom: 10px; }
+  .panel { display: flex; flex-direction: column; align-items: center; }
+  h2 { color: #aaf; font: bold 12px monospace; margin: 4px 0 2px; text-align: center; }
+  h3 { color: #fa0; font: 11px monospace; margin: 0 0 2px; text-align: center; }
+  canvas { border: 1px solid #333; display: block; }
+</style>
+</head>
+<body>
+<script>
+// ── Visibility algorithm helpers ──────────────────────────────────────────────
+function raySegT(ox,oy,dx,dy,ax,ay,bx,by){
+  const rx=bx-ax,ry=by-ay,denom=dx*ry-dy*rx;
+  if(Math.abs(denom)<1e-10)return null;
+  const t=((ax-ox)*ry-(ay-oy)*rx)/denom;
+  const u=((ax-ox)*dy-(ay-oy)*dx)/denom;
+  if(t<-1e-10||u<-1e-10||u>1+1e-10)return null;
+  return t;
+}
+
+function circleSegIntersectAngles(px,py,r,ax,ay,bx,by){
+  const dx=bx-ax,dy=by-ay,ex=ax-px,ey=ay-py;
+  const a=dx*dx+dy*dy;
+  if(a<1e-10)return[];
+  const b=2*(ex*dx+ey*dy),c=ex*ex+ey*ey-r*r;
+  const disc=b*b-4*a*c;
+  if(disc<0)return[];
+  const sqrtD=Math.sqrt(disc),out=[];
+  for(const t of[(-b-sqrtD)/(2*a),(-b+sqrtD)/(2*a)]){
+    if(t>1e-6&&t<1+1e-6){
+      const tt=Math.min(t,1);
+      out.push(Math.atan2(ay+tt*dy-py,ax+tt*dx-px));
+    }
+  }
+  return out;
+}
+
+// NEW algorithm — with circle-edge intersection angles (the fix)
+function computeVisibilityNew(px,py,radius,wallRects){
+  const r15sq=radius*radius*2.25;
+  const nearby=wallRects.filter(wr=>{
+    const cx=Math.max(wr.x,Math.min(px,wr.x+wr.width));
+    const cy=Math.max(wr.y,Math.min(py,wr.y+wr.height));
+    return (cx-px)**2+(cy-py)**2<r15sq;
+  });
+  const segs=[],angles=[],EPS=0.0001;
+  for(const wr of nearby){
+    const x1=wr.x,y1=wr.y,x2=wr.x+wr.width,y2=wr.y+wr.height;
+    const edges=[[x1,y1,x2,y1],[x2,y1,x2,y2],[x2,y2,x1,y2],[x1,y2,x1,y1]];
+    for(const[ax,ay,bx,by]of edges){
+      segs.push({ax,ay,bx,by});
+      for(const a of circleSegIntersectAngles(px,py,radius,ax,ay,bx,by))
+        angles.push(a-EPS,a,a+EPS);
+    }
+    for(const[cx,cy]of[[x1,y1],[x2,y1],[x1,y2],[x2,y2]]){
+      const a=Math.atan2(cy-py,cx-px);
+      angles.push(a-EPS,a,a+EPS);
+    }
+  }
+  for(let i=0;i<24;i++)angles.push(-Math.PI+(i/24)*Math.PI*2);
+  const pts=[];
+  for(const angle of angles){
+    const ddx=Math.cos(angle),ddy=Math.sin(angle);
+    let minT=radius;
+    for(const s of segs){const t=raySegT(px,py,ddx,ddy,s.ax,s.ay,s.bx,s.by);if(t!==null&&t>0&&t<minT)minT=t;}
+    pts.push({angle,x:px+ddx*minT,y:py+ddy*minT});
+  }
+  pts.sort((a,b)=>a.angle-b.angle);
+  return pts;
+}
+
+// OLD algorithm — only corner angles + 36 boundary rays, NO circle intersections
+function computeVisibilityOld(px,py,radius,wallRects){
+  const r15sq=radius*radius*2.25;
+  const nearby=wallRects.filter(wr=>{
+    const cx=Math.max(wr.x,Math.min(px,wr.x+wr.width));
+    const cy=Math.max(wr.y,Math.min(py,wr.y+wr.height));
+    return (cx-px)**2+(cy-py)**2<r15sq;
+  });
+  const segs=[],angles=[],EPS=0.0001;
+  for(const wr of nearby){
+    const x1=wr.x,y1=wr.y,x2=wr.x+wr.width,y2=wr.y+wr.height;
+    const edges=[[x1,y1,x2,y1],[x2,y1,x2,y2],[x2,y2,x1,y2],[x1,y2,x1,y1]];
+    for(const[ax,ay,bx,by]of edges)segs.push({ax,ay,bx,by});
+    for(const[cx,cy]of[[x1,y1],[x2,y1],[x1,y2],[x2,y2]]){
+      const a=Math.atan2(cy-py,cx-px);
+      angles.push(a-EPS,a,a+EPS);
+    }
+  }
+  for(let i=0;i<36;i++)angles.push(-Math.PI+(i/36)*Math.PI*2);
+  const pts=[];
+  for(const angle of angles){
+    const ddx=Math.cos(angle),ddy=Math.sin(angle);
+    let minT=radius;
+    for(const s of segs){const t=raySegT(px,py,ddx,ddy,s.ax,s.ay,s.bx,s.by);if(t!==null&&t>0&&t<minT)minT=t;}
+    pts.push({angle,x:px+ddx*minT,y:py+ddy*minT});
+  }
+  pts.sort((a,b)=>a.angle-b.angle);
+  return pts;
+}
+
+// ── Positions & wall data ─────────────────────────────────────────────────────
+const VISION_R = 200;
+const VIEW = 500, SIZE = 380, SCALE = SIZE/VIEW;
+
+const SCENARIOS = [
+  {
+    label: 'Spawn — some wall corners in radius',
+    px: 4528, py: 1712,
+    walls: [
+      {"x":3409,"y":1357.67,"width":992,"height":193.33},
+      {"x":4357.67,"y":1318,"width":99.3636,"height":809},
+      {"x":3538,"y":2059,"width":815,"height":84},
+      {"x":4819.67,"y":1943,"width":51.3636,"height":310.666},
+      {"x":4657,"y":1680,"width":296,"height":312},
+      {"x":4648,"y":2088,"width":192.333,"height":95},
+      {"x":4392.67,"y":1318,"width":351.667,"height":170.333},
+      {"x":4353,"y":2055,"width":56,"height":96},
+      {"x":4257,"y":1551,"width":96,"height":416}
+    ]
+  },
+  {
+    label: 'Reactor — 0 corners inside radius (critical case)',
+    px: 729, py: 1395,
+    walls: [
+      {"x":581.36,"y":1065.83,"width":44.6364,"height":813.17},
+      {"x":625,"y":1111,"width":72,"height":744},
+      {"x":697,"y":1087,"width":40,"height":24},
+      {"x":681,"y":1055,"width":56,"height":56},
+      {"x":625,"y":999,"width":56,"height":112}
+    ]
+  }
+];
+
+// ── Render one canvas panel ───────────────────────────────────────────────────
+function renderPanel(cv, px, py, walls, poly) {
+  const ctx = cv.getContext('2d');
+  const toC = (wx,wy) => [(wx-px+VIEW/2)*SCALE, (wy-py+VIEW/2)*SCALE];
+  const [spx,spy] = toC(px,py);
+
+  // Map background
+  ctx.fillStyle='#1a1a3a'; ctx.fillRect(0,0,SIZE,SIZE);
+
+  // Walls
+  for(const wr of walls){
+    const[wx,wy]=toC(wr.x,wr.y);
+    ctx.fillStyle='#2a2a5a'; ctx.fillRect(wx,wy,wr.width*SCALE,wr.height*SCALE);
+    ctx.strokeStyle='#5a5aaa'; ctx.lineWidth=0.5; ctx.strokeRect(wx,wy,wr.width*SCALE,wr.height*SCALE);
+  }
+
+  // Fog composite (mirrors renderFogCanvas in GameScene.ts exactly)
+  const fog=document.createElement('canvas'); fog.width=SIZE; fog.height=SIZE;
+  const fc=fog.getContext('2d');
+  fc.fillStyle='rgba(10,10,10,0.96)'; fc.fillRect(0,0,SIZE,SIZE);          // Step 1
+  fc.globalCompositeOperation='destination-out';                             // Step 2
+  const vR=VISION_R*SCALE;
+  const g=fc.createRadialGradient(spx,spy,0,spx,spy,vR*1.2);
+  g.addColorStop(0,'rgba(0,0,0,1)'); g.addColorStop(0.6,'rgba(0,0,0,1)'); g.addColorStop(1,'rgba(0,0,0,0)');
+  fc.fillStyle=g; fc.fillRect(0,0,SIZE,SIZE);
+  if(poly.length>=3){                                                        // Step 3
+    fc.globalCompositeOperation='source-over';
+    fc.fillStyle='rgba(10,10,10,0.97)';
+    fc.beginPath(); fc.rect(0,0,SIZE,SIZE);
+    const[f0x,f0y]=toC(poly[0].x,poly[0].y); fc.moveTo(f0x,f0y);
+    for(let i=1;i<poly.length;i++){const[cx,cy]=toC(poly[i].x,poly[i].y);fc.lineTo(cx,cy);}
+    fc.closePath(); fc.fill('evenodd');
+  }
+  ctx.drawImage(fog,0,0);
+
+  // Player dot
+  ctx.beginPath(); ctx.arc(spx,spy,4,0,Math.PI*2); ctx.fillStyle='#00ff66'; ctx.fill();
+}
+
+// ── Build layout ──────────────────────────────────────────────────────────────
+for(const {label, px, py, walls} of SCENARIOS){
+  const polyNew = computeVisibilityNew(px, py, VISION_R, walls);
+  const polyOld = computeVisibilityOld(px, py, VISION_R, walls);
+
+  const row = document.createElement('div'); row.className='row';
+
+  for(const [title, poly, highlight] of [
+    [`NEW — ${polyNew.length} rays`, polyNew, '#4f4'],
+    [`OLD — ${polyOld.length} rays`, polyOld, '#f84'],
+  ]){
+    const div=document.createElement('div'); div.className='panel';
+    const h2=document.createElement('h2'); h2.textContent=label; h2.style.color=highlight;
+    const h3=document.createElement('h3'); h3.textContent=title;
+    const cv=document.createElement('canvas'); cv.width=SIZE; cv.height=SIZE;
+    renderPanel(cv, px, py, walls, poly);
+    div.append(h2,h3,cv); row.append(div);
+  }
+  document.body.append(row);
+}
+</script>
+</body>
+</html>
