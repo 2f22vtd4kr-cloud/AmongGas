@@ -77,7 +77,7 @@ export function fixRedSprite(
   out.width  = w;
   out.height = h;
 
-  const ctx = out.getContext('2d')!;
+  const ctx = out.getContext('2d', { willReadFrequently: true })!;
   ctx.drawImage(src, 0, 0);
 
   const id = ctx.getImageData(0, 0, w, h);
@@ -123,7 +123,7 @@ export function recolorCanvas(
   out.width  = w;
   out.height = h;
 
-  const ctx = out.getContext('2d')!;
+  const ctx = out.getContext('2d', { willReadFrequently: true })!;
   ctx.drawImage(src, 0, 0);
 
   const [tr, tg, tb] = target;

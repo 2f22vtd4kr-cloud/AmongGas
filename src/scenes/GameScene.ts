@@ -839,7 +839,7 @@ export class GameScene extends Phaser.Scene {
     this.fogCanvas = document.createElement('canvas');
     this.fogCanvas.width  = W;
     this.fogCanvas.height = H;
-    this.fogCtx = this.fogCanvas.getContext('2d')!;
+    this.fogCtx = this.fogCanvas.getContext('2d', { willReadFrequently: true })!;
     // Hook into the HUD camera's pre-render so the fog is composited AFTER
     // the world camera draws the map/players but BEFORE the HUD is drawn.
     this.uiCamera.on('prerender', this.renderFogCanvas, this);
