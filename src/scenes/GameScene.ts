@@ -15,9 +15,10 @@ import {
 
 type SabotageType = '' | 'lights' | 'comms' | 'reactor' | 'o2' | 'doors';
 const FIXABLE_SABOTAGE_TYPES: Exclude<SabotageType, '' | 'doors'>[] = ['lights', 'comms', 'reactor', 'o2'];
-import type { TaskDef, BotData } from '../types';
+import type { TaskDef, BotData, WallRect } from '../types';
 import { parseTmx } from '../utils/TmxParser';
 import { fitContain } from '../utils/imageFit';
+import { computeVisibilityPolygon } from '../utils/visibility';
 
 /** How often (ms) the local player's position is sent to the server — 10 Hz, matching the server's TICK_MS. */
 const MOVE_SEND_INTERVAL_MS = 100;
@@ -151,6 +152,7 @@ export class GameScene extends Phaser.Scene {
   private fogOuter!: Phaser.GameObjects.Rectangle;   // soft-edge transition layer
   private fogMaskInner!: Phaser.GameObjects.Graphics;
   private fogMaskOuter!: Phaser.GameObjects.Graphics;
+  private wallRects: WallRect[] = [];                // TMX collision rects — used by shadow-casting fog
 
   // --- UI overlay ---
   // A second, unzoomed camera dedicated to HUD/UI. Camera zoom/rotation on
@@ -251,6 +253,7 @@ export class GameScene extends Phaser.Scene {
     // ── Parse TMX for collision + objects ──
     const tmxText = this.cache.text.get('map_tmx') as string;
     const { walls: wallRects, objects: mapObjs } = parseTmx(tmxText);
+    this.wallRects = wallRects; // keep for per-frame shadow casting in updateFog()
 
     // ── Static walls ──
     this.walls = this.physics.add.staticGroup();
@@ -393,6 +396,36 @@ export class GameScene extends Phaser.Scene {
     const inset = tg?.safeAreaInset;
     this.safeTop = Math.round(inset?.top    ?? 0);
     this.safeBot = Math.round(inset?.bottom ?? 0);
+  }
+
+  /**
+   * Called by main.ts whenever the Telegram Mini App viewport changes
+   * (e.g. keyboard shown, swipe gesture, safe-area inset update).
+   * Re-reads insets and moves every safe-area-sensitive HUD element.
+   */
+  public onViewportChanged(): void {
+    this.readSafeInsets();
+    const { width: W, height: H } = this.scale;
+    const st = this.safeTop, sb = this.safeBot;
+    const actionX = 68;
+
+    // Joystick home (only move when finger is not on it)
+    if (!this.joystickActive) {
+      const jx = W - 130, jy = H - 170 - sb;
+      this.joystickBase?.setPosition(jx, jy);
+      this.joystickThumb?.setPosition(jx, jy);
+    }
+
+    // Action buttons
+    this.killBtn?.setPosition(actionX, H - 390 - sb);
+    this.reportBtn?.setPosition(actionX, H - 260 - sb);
+    this.useBtn?.setPosition(actionX, H - 130 - sb);
+    this.sabotageBtn?.setPosition(actionX, H - 520 - sb);
+    this.interactPrompt?.setPosition(W / 2, H - 210 - sb);
+
+    // Corner buttons
+    this.emergencyBtn?.setPosition(EMERGENCY_BTN_W / 2 + 12, EMERGENCY_BTN_H / 2 + 56 + st);
+    this.miniMapBtn?.setPosition(W - 52, 52 + st);
   }
 
   // ────────────────── Tasks ──────────────────
@@ -828,11 +861,18 @@ export class GameScene extends Phaser.Scene {
   }
 
   /**
-   * Called every frame from update(). Repositions the mask circles to follow
-   * the player in screen space. Hidden entirely when the player is a ghost.
+   * Called every frame from update(). Computes a 2D visibility polygon via
+   * shadow casting (walls block line-of-sight, matching the original game),
+   * then draws it as the fog mask so only the genuinely visible area is lit.
+   *
+   * Inner mask  → visibility polygon at vision radius (hard wall shadow)
+   * Outer mask  → same polygon scaled ×1.35 outward from the player for the
+   *               soft-edge transition zone; scaling rather than a plain circle
+   *               stops the glow from bleeding through nearby walls.
+   *
+   * Ghosts see the full map with no overlay.
    */
   private updateFog() {
-    // Ghosts see the full map — hide the fog
     if (!this.player.isAlive) {
       if (this.fogInner.visible) {
         this.fogInner.setVisible(false);
@@ -846,23 +886,41 @@ export class GameScene extends Phaser.Scene {
     }
 
     const cam = this.cameras.main;
-    // World → screen: subtract camera top-left, scale by zoom
-    const sx = (this.player.x - cam.worldView.x) * cam.zoom;
-    const sy = (this.player.y - cam.worldView.y) * cam.zoom;
 
-    // 'lights' sabotage tanks crew vision only — impostors see normally,
-    // matching the original game (lights is a crew-blinding tool, not a
-    // mutual blackout).
+    // 'lights' sabotage blinds crewmates only — impostors see normally.
     const crewVision = (this.sabotageType === 'lights') ? CREW_VISION_SABOTAGED : CREW_VISION;
-    const baseR = (this.player.isImpostor ? IMP_VISION : crewVision) * cam.zoom;
+    const visionRadius = this.player.isImpostor ? IMP_VISION : crewVision;
 
+    // Compute visibility polygon in world space, convert to screen space.
+    const worldPoly = computeVisibilityPolygon(
+      this.player.x, this.player.y, visionRadius, this.wallRects,
+    );
+    const screenPoly = worldPoly.map(p => ({
+      x: (p.x - cam.worldView.x) * cam.zoom,
+      y: (p.y - cam.worldView.y) * cam.zoom,
+    }));
+
+    // ── Inner mask: exact visibility polygon ──
     this.fogMaskInner.clear();
     this.fogMaskInner.fillStyle(0xffffff);
-    this.fogMaskInner.fillCircle(sx, sy, baseR);
+    if (screenPoly.length >= 3) {
+      this.fogMaskInner.fillPoints(screenPoly as Phaser.Types.Math.Vector2Like[], true, true);
+    }
+
+    // ── Outer mask: scaled-out polygon for soft falloff ──
+    // Each point is pushed away from the player by ×1.35, so the glow
+    // follows the wall silhouette instead of bleeding as a flat circle.
+    const { x: ppx, y: ppy } = this.player;
+    const outerPoly = worldPoly.map(p => ({
+      x: (ppx + (p.x - ppx) * 1.35 - cam.worldView.x) * cam.zoom,
+      y: (ppy + (p.y - ppy) * 1.35 - cam.worldView.y) * cam.zoom,
+    }));
 
     this.fogMaskOuter.clear();
     this.fogMaskOuter.fillStyle(0xffffff);
-    this.fogMaskOuter.fillCircle(sx, sy, baseR * 1.4);
+    if (outerPoly.length >= 3) {
+      this.fogMaskOuter.fillPoints(outerPoly as Phaser.Types.Math.Vector2Like[], true, true);
+    }
   }
 
   /**

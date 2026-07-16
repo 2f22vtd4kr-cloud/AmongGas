@@ -50,6 +50,7 @@ export class MeetingScene extends Phaser.Scene {
   private gameScene!: GameScene;
   private isMultiplayer = false;
   private playerSessionId = '';
+  private safeBot = 0;   // Telegram bottom inset (home bar), read in create()
 
   private voters: Voter[] = [];
   private votes: Map<string, string | 'skip'> = new Map();
@@ -121,8 +122,14 @@ export class MeetingScene extends Phaser.Scene {
   create() {
     const { width: W, height: H } = this.scale;
 
+    // Read Telegram safe-area bottom inset (home bar on iPhone etc.)
+    type TgWA = { safeAreaInset?: { bottom: number } };
+    const tg = (window as unknown as { Telegram?: { WebApp?: TgWA } }).Telegram?.WebApp;
+    this.safeBot = Math.round(tg?.safeAreaInset?.bottom ?? 0);
+
     this.add.rectangle(W / 2, H / 2, W, H, 0x000000, 0.95);
 
+    // ── Header ──────────────────────────────────────────────────────────────
     this.add.text(W / 2, 28, '🚨  EMERGENCY MEETING  🚨', {
       fontSize: '28px', color: '#ff4444', fontFamily: 'Arial', fontStyle: 'bold',
     }).setOrigin(0.5, 0);
@@ -135,16 +142,20 @@ export class MeetingScene extends Phaser.Scene {
       fontSize: '26px', color: '#ffff00', fontFamily: 'Arial', fontStyle: 'bold',
     }).setOrigin(1, 0);
 
+    // ── Voter list ───────────────────────────────────────────────────────────
     this.buildVoterList();
 
+    // ── Bottom bar ───────────────────────────────────────────────────────────
+    // Respect the home-bar safe area so buttons aren't hidden under the notch.
+    const bottomY = H - 24 - this.safeBot;
     if (this.playerAlive) {
-      const skipBtn = this.add.text(W / 2, H - 30, '⏭  Skip Vote', {
-        fontSize: '24px', color: '#aaaaaa', backgroundColor: '#333',
-        padding: { x: 24, y: 14 }, fontFamily: 'Arial',
+      const skipBtn = this.add.text(W / 2, bottomY, '⏭  Skip Vote', {
+        fontSize: '26px', color: '#aaaaaa', backgroundColor: '#333',
+        padding: { x: 28, y: 16 }, fontFamily: 'Arial',
       }).setOrigin(0.5, 1).setInteractive({ useHandCursor: true });
       skipBtn.on('pointerdown', () => this.castVote('skip'));
     } else {
-      this.add.text(W / 2, H - 30, '☠  You are dead — spectating only', {
+      this.add.text(W / 2, bottomY, '☠  You are dead — spectating only', {
         fontSize: '20px', color: '#555555', fontFamily: 'Arial',
         padding: { x: 24, y: 14 },
       }).setOrigin(0.5, 1);
@@ -172,9 +183,13 @@ export class MeetingScene extends Phaser.Scene {
   }
 
   private buildVoterList() {
-    const { width: W } = this.scale;
+    const { width: W, height: H } = this.scale;
     const startY = 108;
-    const rowH = 72;
+    // Row height scales with player count so rows always fit the available
+    // space between the header (y=108) and the skip button area (~H-90).
+    const availH = H - 90 - this.safeBot - startY;
+    const maxRows = Math.min(this.voters.length, 15);
+    const rowH = Math.max(68, Math.min(86, Math.floor(availH / Math.max(maxRows, 1))));
     const rowW = W - 32;
 
     this.voteButtons = [];
@@ -190,20 +205,23 @@ export class MeetingScene extends Phaser.Scene {
       const y = startY + i * rowH;
       const container = this.add.container(x, y);
 
-      const bg = this.add.rectangle(0, 0, rowW, rowH - 6, 0x222222).setOrigin(0, 0);
-      bg.setInteractive(new Phaser.Geom.Rectangle(0, 0, rowW, rowH - 6), Phaser.Geom.Rectangle.Contains);
+      const rowInner = rowH - 6;
+      const bg = this.add.rectangle(0, 0, rowW, rowInner, 0x222222).setOrigin(0, 0);
+      bg.setInteractive(new Phaser.Geom.Rectangle(0, 0, rowW, rowInner), Phaser.Geom.Rectangle.Contains);
 
-      const swatch = this.add.rectangle(12, (rowH - 6) / 2 - 18, 36, 36, colorMap[v.color] ?? 0x666666).setOrigin(0, 0);
+      const swatchSize = Math.min(38, rowInner - 14);
+      const swatch = this.add.rectangle(14, (rowInner - swatchSize) / 2, swatchSize, swatchSize, colorMap[v.color] ?? 0x666666).setOrigin(0, 0);
 
-      const nameTxt = this.add.text(60, 12, v.isPlayer ? `★ ${v.name}` : v.name, {
-        fontSize: '22px', color: '#ffffff', fontFamily: 'Arial', fontStyle: v.isPlayer ? 'bold' : 'normal',
+      const nameY = Math.max(8, rowInner * 0.14);
+      const nameTxt = this.add.text(64, nameY, v.isPlayer ? `★ ${v.name}` : v.name, {
+        fontSize: '24px', color: '#ffffff', fontFamily: 'Arial', fontStyle: v.isPlayer ? 'bold' : 'normal',
       }).setOrigin(0, 0);
 
-      const subTxt = this.add.text(60, 38, v.isPlayer ? 'You' : 'Crewmate', {
-        fontSize: '14px', color: '#888888', fontFamily: 'Arial',
+      const subTxt = this.add.text(64, nameY + 30, v.isPlayer ? 'You' : 'Crewmate', {
+        fontSize: '15px', color: '#888888', fontFamily: 'Arial',
       }).setOrigin(0, 0);
 
-      const votedTxt = this.add.text(rowW - 12, 12, '', {
+      const votedTxt = this.add.text(rowW - 14, nameY, '', {
         fontSize: '18px', color: '#ffff00', fontFamily: 'Arial',
       }).setOrigin(1, 0);
 
@@ -289,52 +307,67 @@ export class MeetingScene extends Phaser.Scene {
 
   // ── Chat (multiplayer only) ─────────────────────────────────────────────────
 
-  /** Builds the toggle button, unread badge, and (initially hidden) chat panel. */
+  /**
+   * Builds the chat toggle button (bottom-right corner), unread badge, and the
+   * chat panel. In portrait the panel is a bottom-sheet (lower ~60 % of the
+   * screen) so the voter list above it stays visible during discussion.
+   */
   private buildChatUi() {
     const { width: W, height: H } = this.scale;
+    const sb = this.safeBot;
 
-    this.chatToggleBtn = this.add.text(20, 28, '💬 Chat', {
+    // ── Toggle button — bottom-right, above the skip area ────────────────────
+    const toggleY = H - 90 - sb;
+    this.chatToggleBtn = this.add.text(W - 16, toggleY, '💬 Chat', {
       fontSize: '20px', color: '#ffffff', backgroundColor: '#333',
-      padding: { x: 10, y: 6 }, fontFamily: 'Arial',
-    }).setOrigin(0, 0).setInteractive({ useHandCursor: true }).setDepth(30);
+      padding: { x: 12, y: 8 }, fontFamily: 'Arial',
+    }).setOrigin(1, 0).setInteractive({ useHandCursor: true }).setDepth(30);
     this.chatToggleBtn.on('pointerup', () => this.chatOpen ? this.closeChatPanel() : this.openChatPanel());
 
-    this.chatBadge = this.add.text(20 + this.chatToggleBtn.width - 8, 22, '', {
+    this.chatBadge = this.add.text(W - 16, toggleY - 6, '', {
       fontSize: '14px', color: '#ffffff', backgroundColor: '#ff2222',
       padding: { x: 5, y: 1 }, fontFamily: 'Arial', fontStyle: 'bold',
-    }).setOrigin(0.5, 0).setDepth(31).setVisible(false);
+    }).setOrigin(1, 1).setDepth(31).setVisible(false);
 
-    const panelW = W * 0.88;
-    const panelH = H * 0.6;
-    this.chatPanel = this.add.container(W / 2, H / 2).setDepth(40).setVisible(false);
+    // ── Chat panel — bottom-sheet (lower 60 %) ────────────────────────────────
+    // Anchored to the bottom so the voter list above it stays readable.
+    const panelW = W * 0.94;
+    const panelH = H * 0.60;
+    const panelCY = H - panelH / 2 - sb; // panel centre-Y
+    this.chatPanel = this.add.container(W / 2, panelCY).setDepth(40).setVisible(false);
 
-    const bg = this.add.rectangle(0, 0, panelW, panelH, 0x0a0a0a, 0.97).setStrokeStyle(2, 0x555555);
+    const bg = this.add.rectangle(0, 0, panelW, panelH, 0x080810, 0.97).setStrokeStyle(2, 0x555577);
     const title = this.add.text(-panelW / 2 + 16, -panelH / 2 + 12, '💬 Meeting Chat', {
       fontSize: '20px', color: '#ffdd57', fontFamily: 'Arial', fontStyle: 'bold',
     }).setOrigin(0, 0);
-    const closeBtn = this.add.text(panelW / 2 - 16, -panelH / 2 + 12, '✕', {
-      fontSize: '22px', color: '#ffffff', fontFamily: 'Arial',
+    const closeBtn = this.add.text(panelW / 2 - 14, -panelH / 2 + 12, '✕', {
+      fontSize: '24px', color: '#ffffff', fontFamily: 'Arial',
     }).setOrigin(1, 0).setInteractive({ useHandCursor: true });
     closeBtn.on('pointerup', () => this.closeChatPanel());
 
-    this.chatLogText = this.add.text(-panelW / 2 + 16, -panelH / 2 + 52, '', {
+    // Log area — more vertical space in portrait
+    const logY = -panelH / 2 + 54;
+    const logH  = panelH - 54 - (this.playerAlive ? 90 : 50);
+    // Log area — large enough for CHAT_MAX_LOG messages; no overflow clip needed.
+    void logH; // computed above for layout reference; not used for clipping
+    this.chatLogText = this.add.text(-panelW / 2 + 16, logY, '', {
       fontSize: '16px', color: '#ffffff', fontFamily: 'Arial',
-      wordWrap: { width: panelW - 32 }, lineSpacing: 6,
+      wordWrap: { width: panelW - 32 }, lineSpacing: 8,
     }).setOrigin(0, 0);
 
     this.chatPanel.add([bg, title, closeBtn, this.chatLogText]);
 
     if (this.playerAlive) {
-      const inputBoxW = panelW - 128;
-      const inputY = panelH / 2 - 60;
-      const inputBg = this.add.rectangle(-panelW / 2 + 16, inputY, inputBoxW, 44, 0x222222)
-        .setOrigin(0, 0).setStrokeStyle(1, 0x555555).setInteractive({ useHandCursor: true });
-      this.chatInputPreview = this.add.text(-panelW / 2 + 26, inputY + 11, 'Type a message…', {
+      const inputBoxW = panelW - 110;
+      const inputY = panelH / 2 - 72;
+      const inputBg = this.add.rectangle(-panelW / 2 + 16, inputY, inputBoxW, 48, 0x1a1a2e)
+        .setOrigin(0, 0).setStrokeStyle(1, 0x555577).setInteractive({ useHandCursor: true });
+      this.chatInputPreview = this.add.text(-panelW / 2 + 28, inputY + 13, 'Type a message…', {
         fontSize: '16px', color: '#888888', fontFamily: 'Arial',
       }).setOrigin(0, 0);
-      const sendBtn = this.add.text(panelW / 2 - 16, inputY, 'Send', {
+      const sendBtn = this.add.text(panelW / 2 - 14, inputY, 'Send', {
         fontSize: '18px', color: '#ffffff', backgroundColor: '#1a6b3a',
-        padding: { x: 14, y: 12 }, fontFamily: 'Arial', fontStyle: 'bold',
+        padding: { x: 14, y: 14 }, fontFamily: 'Arial', fontStyle: 'bold',
       }).setOrigin(1, 0).setInteractive({ useHandCursor: true });
 
       inputBg.on('pointerup', () => this.chatInputEl?.focus());
@@ -342,7 +375,7 @@ export class MeetingScene extends Phaser.Scene {
 
       this.chatPanel.add([inputBg, this.chatInputPreview, sendBtn]);
 
-      // Hidden HTML input for mobile/desktop keyboard — mirrors LobbyScene/MenuScene pattern.
+      // Off-screen HTML input for mobile keyboard (same pattern as LobbyScene/MenuScene).
       this.chatInputEl = document.createElement('input');
       this.chatInputEl.type = 'text';
       this.chatInputEl.maxLength = CHAT_INPUT_MAXLEN;
@@ -357,7 +390,7 @@ export class MeetingScene extends Phaser.Scene {
         if (e.key === 'Enter') this.sendChat();
       });
     } else {
-      const ghostNote = this.add.text(0, panelH / 2 - 40, '☠ Ghosts can only spectate the chat', {
+      const ghostNote = this.add.text(0, panelH / 2 - 44, '☠ Ghosts can only spectate the chat', {
         fontSize: '15px', color: '#666666', fontFamily: 'Arial',
       }).setOrigin(0.5, 0);
       this.chatPanel.add(ghostNote);

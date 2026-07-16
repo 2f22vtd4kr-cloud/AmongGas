@@ -66,11 +66,13 @@ const config: Phaser.Types.Core.GameConfig = {
 };
 
 // Telegram Mini App bootstrap — safe to call even outside Telegram
-const tg = (window as unknown as { Telegram?: { WebApp?: {
+type TgWebApp = {
   ready(): void;
   expand(): void;
   disableVerticalSwipes?(): void;
-} } }).Telegram?.WebApp;
+  onEvent?(eventType: string, callback: () => void): void;
+};
+const tg = (window as unknown as { Telegram?: { WebApp?: TgWebApp } }).Telegram?.WebApp;
 if (tg) {
   tg.ready();
   tg.expand();
@@ -84,5 +86,17 @@ game.events.once('ready', () => {
   const el = document.getElementById('loading');
   if (el) el.style.display = 'none';
 });
+
+// Telegram viewport-change hook — fires when the keyboard opens/closes, a
+// swipe gesture resizes the Mini App window, or safe-area insets change.
+// We forward it to GameScene so HUD elements stay correctly placed.
+if (tg?.onEvent) {
+  tg.onEvent('viewportChanged', () => {
+    const gs = game.scene.getScene('GameScene') as { onViewportChanged?(): void } | null;
+    if (gs && game.scene.isActive('GameScene')) {
+      gs.onViewportChanged?.();
+    }
+  });
+}
 
 export default game;
