@@ -101,8 +101,7 @@ function applyFog(ctx, poly, shadowTables){
   fog.width=CW; fog.height=CH;
   const fc=fog.getContext('2d');
 
-  // Dark navy overlay — matches original AU cool-tinted darkness
-  fc.fillStyle='rgba(0,12,30,0.82)';
+  fc.fillStyle='rgba(0,5,12,0.44)';
   fc.fillRect(0,0,CW,CH);
 
   const sx=tx(PLAYER.x),sy=ty(PLAYER.y),visionR=VISION_R*SCALE;
@@ -115,7 +114,7 @@ function applyFog(ctx, poly, shadowTables){
 
   if(poly.length>=3){
     fc.globalCompositeOperation='source-over';
-    fc.fillStyle='rgba(0,8,20,0.97)'; // deep navy wall shadows
+    fc.fillStyle='rgba(0,2,8,0.55)';
     fc.beginPath(); fc.rect(0,0,CW,CH);
     fc.moveTo(tx(poly[0].x),ty(poly[0].y));
     for(let i=1;i<poly.length;i++) fc.lineTo(tx(poly[i].x),ty(poly[i].y));

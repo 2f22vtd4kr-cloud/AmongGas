@@ -9,9 +9,9 @@ description: How the fog-of-war works in GameScene — native Canvas 2D offscree
 An offscreen `HTMLCanvasElement` (`fogCanvas`, 750×1334) is composited onto the live Phaser game canvas each frame via the `uiCamera.prerender` event (fires after the world camera has drawn, before the HUD camera draws its objects). Phaser is forced to Canvas renderer in `main.ts`; never switch to WebGL or `getContext('2d')` on the game canvas returns null.
 
 ## Four-step render (renderFogCanvas in GameScene.ts)
-1. Fill offscreen with dark navy overlay (`rgba(0,12,30,0.82)`) — cool blue-tinted, 82% opaque so floor tiles barely show through. Wall-shadow areas get a second near-opaque pass in step 3.
+1. Fill offscreen with dark navy overlay (`rgba(0,5,12,0.44)`) — cool blue-tinted, 44% opaque; open foggy areas of the map show at ~56% brightness (matching original AU). Wall-shadow areas get a second pass (step 3) that brings them to ~25% brightness.
 2. `destination-out` radial gradient punches a soft disc of light at the player's screen position. Gradient stops: opaque 0→60% of `visionR*1.2`, fades to transparent at `visionR*1.2`.
-3. `source-over` even-odd fill re-darkens wall-shadow areas: path = full-canvas rect + visibility polygon. Even-odd fills the region *outside* the polygon → hard shadow edges where walls block sight.
+3. `source-over` even-odd fill re-darkens wall-shadow areas with `rgba(0,2,8,0.55)`: path = full-canvas rect + visibility polygon. Even-odd fills the region *outside* the polygon → combined opacity ~0.74, map visible at ~26%. Gradient edge stop is at 0.85 (not 0.60) for a crisp boundary with only a 15% soft zone.
 4. `gameCtx.save()` / `drawImage(fogCanvas, 0, 0)` / `gameCtx.restore()` blits onto the live canvas. Always save/restore and set `globalCompositeOperation = 'source-over'` and identity transform before drawing — Phaser may leave the context in a non-default state.
 
 ## Critical correctness rule: polygon radius = visionR × 1.2

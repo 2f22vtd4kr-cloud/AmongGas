@@ -1016,7 +1016,7 @@ export class GameScene extends Phaser.Scene {
     // geometry (floor tiles, wall outlines) barely shows through — matching
     // the cool "unlit" look of the original game. Wall-shadow areas get a
     // second near-opaque pass in Step 3 so they stay very dark.
-    ctx.fillStyle = 'rgba(0,12,30,0.82)';
+    ctx.fillStyle = 'rgba(0,5,12,0.44)';
     ctx.fillRect(0, 0, W, H);
 
     // ── Step 2: erase a soft disc of light at the player ─────────────────────
@@ -1044,7 +1044,7 @@ export class GameScene extends Phaser.Scene {
     );
     if (worldPoly.length >= 3) {
       ctx.globalCompositeOperation = 'source-over';
-      ctx.fillStyle = 'rgba(0,8,20,0.97)'; // deep navy, nearly opaque wall shadows
+      ctx.fillStyle = 'rgba(0,2,8,0.55)'; // wall shadows noticeably darker than open-fog areas
       const toSx = (wx: number) => (wx - cam.worldView.x) * cam.zoom;
       const toSy = (wy: number) => (wy - cam.worldView.y) * cam.zoom;
       ctx.beginPath();
