@@ -2,53 +2,37 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>Fog — game-accurate render</title>
+<title>Fog — game-accurate render (NEW vs OLD algorithm)</title>
 <style>
-  body { margin:0; background:#1a0a2e; display:flex; gap:8px; padding:8px; flex-wrap:wrap; }
+  body { margin:0; background:#1a0a2e; display:flex; flex-direction:column; gap:12px; padding:10px; }
+  .row { display:flex; gap:10px; flex-wrap:wrap; }
   .panel { display:flex; flex-direction:column; align-items:center; }
-  h3 { color:#fff; font:bold 11px monospace; margin:2px 0; text-align:center; }
+  h2 { color:#aaf; font:bold 13px monospace; margin:0 0 3px; }
+  h3 { font:11px monospace; margin:0 0 2px; text-align:center; }
   canvas { border:1px solid #444; display:block; }
+  hr { border-color:#333; width:100%; }
 </style>
 </head>
 <body>
 <script>
 // ── Game constants (from settings.ts) ─────────────────────────────────────────
 const CAMERA_ZOOM = 1.45;
-const CREW_VISION = 200;   // world units
+const CREW_VISION = 200;   // world units  (r = 200 wu → 290 px at zoom 1.45)
 const GAME_W = 750, GAME_H = 1334;
-const MAP_W = 5792, MAP_H = 3168;
 
-const PLAYER = { x: 4528, y: 1712 };
-
-// Wall rects near spawn, within 400 world units (from map_final.backv2.tmx)
-const WALLS = [
-  {"x":3409,"y":1357.67,"width":992,"height":193.33},
-  {"x":4357.67,"y":1318,"width":99.3636,"height":809},
-  {"x":4939.67,"y":1472,"width":341.364,"height":225.666},
-  {"x":4657,"y":1680,"width":296,"height":312},
-  {"x":4648,"y":2088,"width":192.333,"height":95},
-  {"x":4392.67,"y":1318,"width":351.667,"height":170.333},
-  {"x":4353,"y":2055,"width":56,"height":96},
-  {"x":4265,"y":2143,"width":91,"height":40},
-  {"x":4121,"y":1551,"width":40,"height":56},
-  {"x":4233,"y":1967,"width":120,"height":48},
-  {"x":4209,"y":1999,"width":112,"height":48},
-  {"x":4185,"y":2023,"width":112,"height":48},
-  {"x":4161,"y":2047,"width":112,"height":48},
-  {"x":4257,"y":1551,"width":96,"height":416},
-  {"x":4819.67,"y":1943,"width":51.3636,"height":310.666},
-  {"x":3538,"y":2059,"width":815,"height":84},
-];
-
-// ── Visibility algorithm ──────────────────────────────────────────────────────
+// ── Visibility algorithm helpers ──────────────────────────────────────────────
 function raySegT(ox,oy,dx,dy,ax,ay,bx,by){
-  const rx=bx-ax,ry=by-ay,d=dx*ry-dy*rx;
-  if(Math.abs(d)<1e-10)return null;
-  const t=((ax-ox)*ry-(ay-oy)*rx)/d,u=((ax-ox)*dy-(ay-oy)*dx)/d;
+  const rx=bx-ax,ry=by-ay,denom=dx*ry-dy*rx;
+  if(Math.abs(denom)<1e-10)return null;
+  const t=((ax-ox)*ry-(ay-oy)*rx)/denom;
+  const u=((ax-ox)*dy-(ay-oy)*dx)/denom;
   if(t<-1e-10||u<-1e-10||u>1+1e-10)return null;
   return t;
 }
-function circleAngles(px,py,r,ax,ay,bx,by){
+
+// NEW — circle-edge intersection angles (fixes walls that span the vision
+// circle but have ALL corners outside the radius).
+function circleSegAngles(px,py,r,ax,ay,bx,by){
   const dx=bx-ax,dy=by-ay,ex=ax-px,ey=ay-py,a=dx*dx+dy*dy;
   if(a<1e-10)return[];
   const b=2*(ex*dx+ey*dy),c=ex*ex+ey*ey-r*r,disc=b*b-4*a*c;
@@ -59,7 +43,8 @@ function circleAngles(px,py,r,ax,ay,bx,by){
   }
   return out;
 }
-function computePoly(px,py,radius,walls){
+
+function computePolyNew(px,py,radius,walls,BDRY=64){
   const r15sq=radius*radius*2.25;
   const nearby=walls.filter(w=>{
     const cx=Math.max(w.x,Math.min(px,w.x+w.width)),cy=Math.max(w.y,Math.min(py,w.y+w.height));
@@ -70,11 +55,11 @@ function computePoly(px,py,radius,walls){
     const x1=w.x,y1=w.y,x2=w.x+w.width,y2=w.y+w.height;
     for(const[ax,ay,bx,by]of[[x1,y1,x2,y1],[x2,y1,x2,y2],[x2,y2,x1,y2],[x1,y2,x1,y1]]){
       segs.push({ax,ay,bx,by});
-      for(const a of circleAngles(px,py,radius,ax,ay,bx,by))angles.push(a-E,a,a+E);
+      for(const a of circleSegAngles(px,py,radius,ax,ay,bx,by))angles.push(a-E,a,a+E);
     }
     for(const[cx,cy]of[[x1,y1],[x2,y1],[x1,y2],[x2,y2]]){const a=Math.atan2(cy-py,cx-px);angles.push(a-E,a,a+E);}
   }
-  for(let i=0;i<24;i++)angles.push(-Math.PI+(i/24)*Math.PI*2);
+  for(let i=0;i<BDRY;i++)angles.push(-Math.PI+(i/BDRY)*Math.PI*2);
   const pts=[];
   for(const angle of angles){
     const ddx=Math.cos(angle),ddy=Math.sin(angle);let minT=radius;
@@ -84,7 +69,8 @@ function computePoly(px,py,radius,walls){
   pts.sort((a,b)=>a.angle-b.angle);
   return pts;
 }
-// OLD — no circle intersections
+
+// OLD — only wall-corner angles + 36 boundary rays, no circle intersections.
 function computePolyOld(px,py,radius,walls){
   const r15sq=radius*radius*2.25;
   const nearby=walls.filter(w=>{
@@ -109,33 +95,30 @@ function computePolyOld(px,py,radius,walls){
 }
 
 // ── Render one game-sized panel ───────────────────────────────────────────────
-// Mirrors renderFogCanvas() exactly: zoom, world-to-screen projection, gradient, even-odd fill.
-function renderGamePanel(cv, mapImg, poly) {
+// Mirrors renderFogCanvas() exactly: zoom, world-to-screen, gradient, even-odd.
+function renderGamePanel(cv, mapImg, px, py, poly) {
   const ctx = cv.getContext('2d');
   const zoom = CAMERA_ZOOM;
-  const px = PLAYER.x, py = PLAYER.y;
 
   // Camera worldView: centred on player
   const viewW = GAME_W / zoom, viewH = GAME_H / zoom;
   const camX = px - viewW / 2, camY = py - viewH / 2;
 
-  // Draw map background: source from map image, scaled by zoom
-  // Source rect (world coords = map pixels at 1:1)
+  // Draw map background clipped from actual map image
   ctx.drawImage(mapImg,
     Math.round(camX), Math.round(camY), Math.round(viewW), Math.round(viewH),
     0, 0, GAME_W, GAME_H
   );
 
-  // Screen position of player
   const sx = (px - camX) * zoom;  // = GAME_W/2
   const sy = (py - camY) * zoom;  // = GAME_H/2
   const visionR = CREW_VISION * zoom;
 
-  // World → screen
+  // World → screen helpers
   const toSx = wx => (wx - camX) * zoom;
   const toSy = wy => (wy - camY) * zoom;
 
-  // Fog composite (exact mirror of renderFogCanvas)
+  // Fog composite (exact mirror of renderFogCanvas in GameScene.ts)
   const fog = document.createElement('canvas');
   fog.width = GAME_W; fog.height = GAME_H;
   const fc = fog.getContext('2d');
@@ -147,8 +130,8 @@ function renderGamePanel(cv, mapImg, poly) {
   // Step 2: cut circular gradient hole
   fc.globalCompositeOperation = 'destination-out';
   const g = fc.createRadialGradient(sx, sy, 0, sx, sy, visionR * 1.2);
-  g.addColorStop(0, 'rgba(0,0,0,1)');
-  g.addColorStop(0.60, 'rgba(0,0,0,1)');
+  g.addColorStop(0,   'rgba(0,0,0,1)');
+  g.addColorStop(0.60,'rgba(0,0,0,1)');
   g.addColorStop(1.0, 'rgba(0,0,0,0)');
   fc.fillStyle = g;
   fc.fillRect(0, 0, GAME_W, GAME_H);
@@ -165,7 +148,11 @@ function renderGamePanel(cv, mapImg, poly) {
     fc.fill('evenodd');
   }
 
+  // Step 4: composite onto display canvas
+  ctx.save();
+  ctx.globalCompositeOperation = 'source-over';
   ctx.drawImage(fog, 0, 0);
+  ctx.restore();
 
   // Player dot
   ctx.beginPath();
@@ -174,41 +161,111 @@ function renderGamePanel(cv, mapImg, poly) {
   ctx.fill();
 }
 
-// ── Load map image and render ─────────────────────────────────────────────────
-const SCALE = 0.42; // display scale factor (so panels fit on screen)
+// ── Scenarios ─────────────────────────────────────────────────────────────────
+// Each has px/py (world coords), walls (nearby rects from TMX), and a note
+// explaining why that position is interesting.
+const SCENARIOS = [
+  {
+    label: 'Spawn — hallway (some corners inside radius)',
+    note: 'Both algorithms agree here; difference is subtle.',
+    px: 4528, py: 1712,
+    walls: [
+      {"x":3409,"y":1357.67,"width":992,"height":193.33},
+      {"x":4357.67,"y":1318,"width":99.3636,"height":809},
+      {"x":4939.67,"y":1472,"width":341.364,"height":225.666},
+      {"x":4657,"y":1680,"width":296,"height":312},
+      {"x":4648,"y":2088,"width":192.333,"height":95},
+      {"x":4392.67,"y":1318,"width":351.667,"height":170.333},
+      {"x":4353,"y":2055,"width":56,"height":96},
+      {"x":4265,"y":2143,"width":91,"height":40},
+      {"x":4121,"y":1551,"width":40,"height":56},
+      {"x":4233,"y":1967,"width":120,"height":48},
+      {"x":4209,"y":1999,"width":112,"height":48},
+      {"x":4185,"y":2023,"width":112,"height":48},
+      {"x":4161,"y":2047,"width":112,"height":48},
+      {"x":4257,"y":1551,"width":96,"height":416},
+      {"x":4819.67,"y":1943,"width":51.3636,"height":310.666},
+      {"x":3538,"y":2059,"width":815,"height":84},
+    ]
+  },
+  {
+    label: 'Reactor room — ALL wall corners outside radius (critical case)',
+    note: 'OLD fails here: no corners to cast rays toward, so the nearby wall casts NO shadow. NEW detects circle-edge crossings and correctly blocks vision through the wall.',
+    px: 729, py: 1395,
+    walls: [
+      // Left outer wall — spans the full vision circle, all corners outside r=200
+      {"x":581.36,"y":1065.83,"width":44.6364,"height":813.17},
+      // Inner wall strips just inside the left wall
+      {"x":625,"y":1111,"width":72,"height":744},
+      {"x":697,"y":1087,"width":40,"height":24},
+      {"x":681,"y":1055,"width":56,"height":56},
+      {"x":625,"y":999,"width":56,"height":112},
+    ]
+  },
+];
+
+// ── Display scale (so game-size panels fit on screen) ────────────────────────
+const SCALE = 0.30;
 const DW = Math.round(GAME_W * SCALE);
 const DH = Math.round(GAME_H * SCALE);
 
-const polyNew = computePoly(PLAYER.x, PLAYER.y, CREW_VISION, WALLS);
-const polyOld = computePolyOld(PLAYER.x, PLAYER.y, CREW_VISION, WALLS);
-
-const configs = [
-  { label: `NEW (${polyNew.length} rays) — with circle-edge intersections`, poly: polyNew, color: '#4f4' },
-  { label: `OLD (${polyOld.length} rays) — corners only`, poly: polyOld, color: '#f84' },
-];
-
+// ── Load map and render all scenarios ─────────────────────────────────────────
 const img = new Image();
 img.onload = () => {
-  for (const { label, poly, color } of configs) {
-    // Full-size offscreen canvas for game-accurate render
-    const offscreen = document.createElement('canvas');
-    offscreen.width = GAME_W; offscreen.height = GAME_H;
-    renderGamePanel(offscreen, img, poly);
+  for (const { label, note, px, py, walls } of SCENARIOS) {
+    const polyNew = computePolyNew(px, py, CREW_VISION, walls, 64);
+    const polyOld = computePolyOld(px, py, CREW_VISION, walls);
 
-    // Display canvas (scaled down to fit)
-    const cv = document.createElement('canvas');
-    cv.width = DW; cv.height = DH;
-    cv.getContext('2d').drawImage(offscreen, 0, 0, DW, DH);
+    const header = document.createElement('h2');
+    header.textContent = label;
+    document.body.append(header);
 
-    const div = document.createElement('div'); div.className = 'panel';
-    const h = document.createElement('h3');
-    h.textContent = label; h.style.color = color;
-    div.append(h, cv);
-    document.body.append(div);
+    if (note) {
+      const p = document.createElement('p');
+      p.style.cssText = 'color:#aaa;font:11px monospace;margin:0 0 6px;max-width:800px';
+      p.textContent = note;
+      document.body.append(p);
+    }
+
+    const row = document.createElement('div');
+    row.className = 'row';
+
+    // NOTE: polys computed at radius*1.2 so the even-odd fill doesn't cut off
+  // the gradient soft-edge zone (see renderFogCanvas comment in GameScene.ts).
+  const polyNewOuter = computePolyNew(px, py, CREW_VISION * 1.2, walls, 64);
+  const polyOldOuter = computePolyOld(px, py, CREW_VISION * 1.2, walls);
+
+  for (const [title, poly, color] of [
+      [`NEW — ${polyNewOuter.length} rays (game uses this)`, polyNewOuter, '#4f4'],
+      [`OLD — ${polyOldOuter.length} rays (before fix)`, polyOldOuter, '#f84'],
+    ]) {
+      // Full-size offscreen render
+      const offscreen = document.createElement('canvas');
+      offscreen.width = GAME_W; offscreen.height = GAME_H;
+      renderGamePanel(offscreen, img, px, py, poly);
+
+      // Scaled-down display canvas
+      const cv = document.createElement('canvas');
+      cv.width = DW; cv.height = DH;
+      cv.getContext('2d').drawImage(offscreen, 0, 0, DW, DH);
+
+      const h3 = document.createElement('h3');
+      h3.textContent = title; h3.style.color = color;
+      const div = document.createElement('div');
+      div.className = 'panel';
+      div.append(h3, cv);
+      row.append(div);
+    }
+
+    document.body.append(row);
+
+    const hr = document.createElement('hr');
+    document.body.append(hr);
   }
 };
 img.onerror = () => {
-  document.body.innerHTML += '<p style="color:red">Map image failed to load — try refreshing</p>';
+  document.body.innerHTML += '<p style="color:red;font-family:monospace">Map image failed to load — serve from Vite (npm run dev) not file://',
+  '</p>';
 };
 img.src = '/Assets/Maps/map2back.png';
 </script>

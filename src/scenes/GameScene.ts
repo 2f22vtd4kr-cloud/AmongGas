@@ -819,19 +819,22 @@ export class GameScene extends Phaser.Scene {
   // ────────────────── Fog of war ──────────────────
 
   /**
-   * Creates two stacked dark overlays (fixed to the viewport) masked by
-   * a circle at the player's position — inner layer is near-opaque (the main
-   * darkness), outer layer is semi-transparent (the soft falloff zone).
-   * Both use GeometryMask with invertAlpha=true so they render everywhere
-   * OUTSIDE their respective circles. Works in Canvas and WebGL.
+   * Sets up the offscreen canvas used for fog-of-war compositing.
+   *
+   * Approach: a native Canvas 2D offscreen canvas (fogCanvas) is filled with
+   * darkness each frame, then a radial gradient + visibility polygon punch
+   * the lit area through it, and the result is blitted onto the live game
+   * canvas (see renderFogCanvas).  This avoids Phaser GeometryMask which
+   * cannot produce soft gradient edges and was removed from 3.90 typings.
    *
    * Visual result:
-   *   0 … CREW_VISION px   → fully lit
-   *   CREW_VISION … ×1.4   → 40 % dark  (transition fade)
-   *   beyond ×1.4           → ~96 % dark (near-black)
+   *   0 … CREW_VISION px   → fully lit (gradient fully erased)
+   *   CREW_VISION … ×1.2   → soft edge (gradient fades to transparent)
+   *   beyond ×1.2           → ~96 % dark (near-black fog)
+   *   wall shadows          → hard edges via even-odd visibility polygon
    *
    * Impostors get IMP_VISION instead of CREW_VISION.
-   * Ghosts see the full map with no overlay.
+   * Ghosts see the full map (fog skipped entirely).
    */
   private setupFog() {
     const { width: W, height: H } = this.scale;
@@ -839,7 +842,7 @@ export class GameScene extends Phaser.Scene {
     this.fogCanvas = document.createElement('canvas');
     this.fogCanvas.width  = W;
     this.fogCanvas.height = H;
-    this.fogCtx = this.fogCanvas.getContext('2d', { willReadFrequently: true })!;
+    this.fogCtx = this.fogCanvas.getContext('2d')!;
     // Hook into the HUD camera's pre-render so the fog is composited AFTER
     // the world camera draws the map/players but BEFORE the HUD is drawn.
     this.uiCamera.on('prerender', this.renderFogCanvas, this);
@@ -867,6 +870,14 @@ export class GameScene extends Phaser.Scene {
    *            i.e. exactly the areas that walls block from sight — restoring
    *            hard, sharp shadow edges while leaving the gradient intact
    *            everywhere else.
+   *
+   *            IMPORTANT: the polygon radius is visionR × 1.2 — matching the
+   *            gradient's outer edge.  If we used visionR the even-odd fill
+   *            would re-darken the gradient's soft-falloff zone in open areas,
+   *            producing a hard circle edge instead of the desired smooth one.
+   *            Wall shadows inside visionR still cast hard edges because their
+   *            polygon vertices sit at the actual wall hit-distance, not at
+   *            the 1.2× limit.
    *
    *  Step 4 — drawImage the offscreen fog canvas onto the live game canvas.
    *
@@ -908,8 +919,10 @@ export class GameScene extends Phaser.Scene {
     // Path = [full screen rect] + [visibility polygon].
     // Even-odd rule: inside rect AND outside polygon → filled (wall shadow).
     //                inside rect AND inside polygon  → not filled (keep gradient).
+    // Polygon radius = visionR × 1.2 to match the gradient's outer edge.
+    // See the comment above for why this must be 1.2× and not 1.0×.
     const worldPoly = computeVisibilityPolygon(
-      this.player.x, this.player.y, visionR / cam.zoom, this.wallRects,
+      this.player.x, this.player.y, (visionR * 1.2) / cam.zoom, this.wallRects,
     );
     if (worldPoly.length >= 3) {
       ctx.globalCompositeOperation = 'source-over';
@@ -927,13 +940,22 @@ export class GameScene extends Phaser.Scene {
     }
 
     // ── Step 4: composite fog onto the live game canvas ───────────────────────
+    // Reset fogCtx composite op so it is clean for the next frame.
     ctx.globalCompositeOperation = 'source-over';
+
     // getContext('2d') returns null on a WebGL canvas — guard against it so a
     // stray WebGL context can never crash the game loop (the renderer is forced
-    // to Canvas in main.ts, but this null-check is a belt-and-suspenders safety net).
+    // to Canvas in main.ts, but this null-check is a belt-and-suspenders net).
     const gameCtx = this.game.canvas.getContext('2d');
     if (!gameCtx) return;
+
+    // save/restore so we do not mutate Phaser's canvas state (transform,
+    // composite op, etc.) and Phaser's next draw call is never corrupted.
+    gameCtx.save();
+    gameCtx.globalCompositeOperation = 'source-over';
+    gameCtx.setTransform(1, 0, 0, 1, 0, 0); // identity — fog always fills full canvas
     gameCtx.drawImage(this.fogCanvas, 0, 0);
+    gameCtx.restore();
   }
 
   /**

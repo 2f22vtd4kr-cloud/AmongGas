@@ -178,9 +178,12 @@ function renderPanel(cv, px, py, walls, poly) {
 }
 
 // ── Build layout ──────────────────────────────────────────────────────────────
+// Polygon radius = VISION_R × 1.2 to match the gradient outer edge.
+// Without this, step 3 even-odd fill re-darkens the gradient's soft-falloff
+// zone in open areas, producing a hard circle instead of a smooth fade.
 for(const {label, px, py, walls} of SCENARIOS){
-  const polyNew = computeVisibilityNew(px, py, VISION_R, walls);
-  const polyOld = computeVisibilityOld(px, py, VISION_R, walls);
+  const polyNew = computeVisibilityNew(px, py, VISION_R * 1.2, walls);
+  const polyOld = computeVisibilityOld(px, py, VISION_R * 1.2, walls);
 
   const row = document.createElement('div'); row.className='row';
 

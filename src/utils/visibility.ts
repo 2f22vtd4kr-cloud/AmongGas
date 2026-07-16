@@ -109,8 +109,10 @@ export function computeVisibilityPolygon(
     }
   }
 
-  // 4. Boundary rays keep the silhouette circular in open areas
-  const BDRY = 24;
+  // 4. Boundary rays keep the silhouette circular in open areas.
+  //    64 rays → one every 5.6° → chord deviation < 0.3 px at r=200, invisible.
+  //    (24 rays → 15° → ~2.5 px deviation, visible as polygon facets.)
+  const BDRY = 64;
   for (let i = 0; i < BDRY; i++) {
     angles.push(-Math.PI + (i / BDRY) * Math.PI * 2);
   }
