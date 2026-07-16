@@ -324,15 +324,46 @@ Tests run against the live Colyseus server with real `@colyseus/sdk` WebSocket c
 - 13 named rooms covered: Cafeteria, Medbay, Security, Reactor, Upper Engine, Lower Engine, Electrical, Storage, Admin, Communications, Oxygen, Cockpit, Weapons.
 - Key files: `src/scenes/GameScene.ts` — `buildHUD()`, `updateRoomLabel()`, `update()`.
 
+### Session 15 (2026-07-16) — Venting, Bot Vent AI, Admin Table Dot Spread
+
+**Vent opening animation (added — procedural Phaser tweens, no new art):**
+- New `playVentAnimation(wx, wy)` private method in `GameScene.ts`: spawns a dark expanding ellipse + metallic rim flash at the given world coordinate using Phaser tweens. Runs in world space so fog-of-war applies naturally — crewmates who are close enough see it; distant ones do not. Total duration ~500 ms; all GameObjects destroyed on tween complete.
+- Called in the local client's `enterVent()`, `exitVent()`, and `travelVent()` flows so the local player sees their own vent grate opening.
+- Called for remote players via three new `room.onMessage` handlers in `initMultiplayer()`:
+  - `PLAYER_VENT` → plays animation at the entry vent (server already broadcast this to all clients except the venting player).
+  - `PLAYER_TRAVEL_VENT` → plays animation at the destination vent.
+  - `PLAYER_EXIT_VENT` → snaps to the closest vent to the remote player's current schema position and plays animation there.
+- All three handlers also play `sfx_vent` at appropriate volume so observers hear the grate audio as well.
+
+**Bot impostor vent AI (added — Freeplay only):**
+- Full state machine on `GameScene`: `idle → moving_to_vent → in_vent → idle`, stored in five private fields (`botVentState`, `botVentTargetId/X/Y`, `botVentCooldownUntil`). All fields reset in `create()` so repeated Freeplay games start clean.
+- `startBotVentAI(imp)`: picks a random vent from `ventData`, sets `botVentState = 'moving_to_vent'`, stores target world position. Blocked when `sabotageType !== ''` (bot stays near the sabotage location during active sabotages, matching original impostor strategy and pre-empting Task #4).
+- `updateBotVentMovement()`: steers the bot toward the vent entrance using `PLAYER_SPEED`-scaled velocity, overriding `bot.update()` output each frame. When within 8 px, calls `enterBotVent()`.
+- `enterBotVent(imp)`: hides bot (`setAlpha(0)`), plays `playVentAnimation()` + `sfx_vent`, picks a random *connected* vent from the vent network graph, teleports bot there, schedules reappearance after 1.5–3 s (random), then sets `in_vent` state. On reappearance: sets `setAlpha(1)`, plays vent animation again at exit vent, applies 8–15 s cooldown, returns to `idle`.
+- `impostorAct()` in freeplay: skips kill logic while `botVentState === 'in_vent'`, aborts vent-entry if a kill target is found (killing always takes priority), and calls `startBotVentAI()` when no kill target is in range.
+- `update()`: calls `updateBotVentMovement()` when `moving_to_vent`; freezes bot velocity to zero while `in_vent`.
+
+**Admin table dot spread (fixed — `src/scenes/AdminTableScene.ts`):**
+- `worldToRoomFraction()` now also returns `roomKey: string` (the room name matched by `AMBIENT_CENTRES`).
+- `drawDots()` refactored: collects all agents (local player + remote players + bot) into a flat array, groups by `roomKey`, then for each group of n dots arranges them evenly on a ring of radius `DOT_R × 2`. Single occupants draw at the room centre as before; clusters of 2+ spread so every dot is individually visible.
+- Bot impostor hidden from admin dots while `botVentState === 'in_vent'` — mirrors the multiplayer `inVent` rule.
+
+**Code quality fix:**
+- Added `get botImpostorInVent(): boolean { return this.botVentState === 'in_vent'; }` public getter to `GameScene`. `AdminTableScene` now uses this typed accessor instead of the earlier `(gs as unknown as { botVentState: string })` cast.
+
 ### Next Session Priorities
 See §9 for the full original-vs-clone gap analysis. Implement in this order:
 1. **Fog of war** — ✅ DONE (Sessions 12 + 14)
 2. **In-meeting chat** — ✅ DONE (Session 13)
 3. **Sabotage** — ✅ DONE (Session 13+)
 4. **Room name label** — ✅ DONE (Session 14)
-5. **Venting** — vent TMX objects placed; needs enter/exit interaction + vent network node graph
-6. **Admin map** — show coloured player-room dots on the admin table
+5. **Venting + vent animation + bot vent AI + admin dot spread** — ✅ DONE (Session 15)
+6. **Remaining proposed tasks** (see task list):
+   - Task #2: Vent animation visible to multiplayer observers — ✅ resolved inside Session 15 (PLAYER_VENT / PLAYER_TRAVEL_VENT / PLAYER_EXIT_VENT handlers)
+   - Task #3: Count badge on admin table clusters (dot group → show number)
+   - Task #4: Bot must not vent during active sabotage — ✅ resolved inside Session 15 (`sabotageType !== ''` guard)
 7. **Security cameras** — let players watch the camera feeds from the Security room
+8. **Multi-step tasks** — Fix Wiring (3 locations), Fuel Engines (2 stages)
 
 ---
 
