@@ -928,7 +928,11 @@ export class GameScene extends Phaser.Scene {
 
     // ── Step 4: composite fog onto the live game canvas ───────────────────────
     ctx.globalCompositeOperation = 'source-over';
-    const gameCtx = this.game.canvas.getContext('2d')!;
+    // getContext('2d') returns null on a WebGL canvas — guard against it so a
+    // stray WebGL context can never crash the game loop (the renderer is forced
+    // to Canvas in main.ts, but this null-check is a belt-and-suspenders safety net).
+    const gameCtx = this.game.canvas.getContext('2d');
+    if (!gameCtx) return;
     gameCtx.drawImage(this.fogCanvas, 0, 0);
   }
 

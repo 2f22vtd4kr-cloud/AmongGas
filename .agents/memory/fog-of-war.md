@@ -61,8 +61,15 @@ this.uiCamera?.off('prerender', this.renderFogCanvas, this);
 this.fogCanvas = null; this.fogCtx = null;
 ```
 
-## Gotcha: getContext('2d') on the game canvas
-`this.game.canvas.getContext('2d')` is cached by the browser — safe to call each frame.
+## Gotcha: getContext('2d') on the game canvas — REQUIRES Canvas renderer
+`this.game.canvas.getContext('2d')` returns **null** when Phaser uses WebGL (Phaser.AUTO picks WebGL
+when the GPU is available — i.e. in any real browser). Calling `.drawImage()` on null crashes the
+Phaser game loop and the game appears completely frozen (no sound, no movement).
+
+**Fix: `type: Phaser.CANVAS` in `src/main.ts`** — must never be changed to AUTO or WEBGL while the
+fog compositing approach is in use. A null-check guard was also added in `renderFogCanvas()` as a
+belt-and-suspenders safety net.
+
 The offscreen `fogCanvas` width/height must match `this.scale.width/height` (internal resolution), not CSS display size.
 
 ## Gotcha: Previous GeometryMask approach (DO NOT revert to this)

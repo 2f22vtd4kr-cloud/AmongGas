@@ -27,7 +27,11 @@ import { LobbyScene } from './scenes/LobbyScene';
 // of shown as black bars (see index.html for why we don't stretch or crop
 // the canvas itself to force a literal edge-to-edge fill).
 const config: Phaser.Types.Core.GameConfig = {
-  type: Phaser.AUTO,
+  // Force Canvas renderer — the fog-of-war system composites an offscreen
+  // canvas onto the game canvas via getContext('2d'), which returns null on a
+  // WebGL canvas and crashes the game loop. Canvas is plenty for this 2D
+  // sprite game and is required for the mobile/Telegram Mini App target.
+  type: Phaser.CANVAS,
   width: 750,
   height: 1334,
   parent: 'game-container',
