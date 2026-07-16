@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Among Gas — Gameplay Preview</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; background: #0a0a1a; display: flex; align-items: center; justify-content: center; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c" width="750" height="1334"></canvas>
+<script>
+const W = 750, H = 1334;
+const c = document.getElementById('c');
+const ctx = c.getContext('2d');
+
+function loadImg(src) {
+  return new Promise((res, rej) => {
+    const img = new Image();
+    img.onload = () => res(img);
+    img.onerror = () => res(null); // graceful fallback
+    img.src = src;
+  });
+}
+
+async function draw() {
+  // ── Map background ──────────────────────────────────────────────
+  const map = await loadImg('/Assets/Maps/map2back.png');
+  if (map) {
+    // Map is larger than canvas — centre it to show a good section
+    const scale = Math.max(W / map.naturalWidth, H / map.naturalHeight) * 0.5;
+    const mw = map.naturalWidth  * scale;
+    const mh = map.naturalHeight * scale;
+    // Pan to show cafeteria area (roughly upper-left of map)
+    ctx.drawImage(map, -mw * 0.0, -mh * 0.1, mw, mh);
+  } else {
+    ctx.fillStyle = '#1a1a2e';
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  // ── Fog of war vignette ─────────────────────────────────────────
+  const fog = ctx.createRadialGradient(310, 780, 180, 310, 780, 520);
+  fog.addColorStop(0, 'rgba(0,0,0,0)');
+  fog.addColorStop(1, 'rgba(0,0,0,0.82)');
+  ctx.fillStyle = fog;
+  ctx.fillRect(0, 0, W, H);
+
+  // ── Player sprite (Blue) ────────────────────────────────────────
+  const player = await loadImg('/Assets/Images/Player/Blue/blue_down_walk/step3.png');
+  if (player) {
+    const pw = 52, ph = Math.round(52 * player.naturalHeight / player.naturalWidth);
+    ctx.drawImage(player, 290, 740, pw, ph);
+  }
+
+  // ── Bot players ─────────────────────────────────────────────────
+  const colors = [
+    { color: 'Red',    dir: 'right', x: 200, y: 700 },
+    { color: 'Green',  dir: 'down',  x: 420, y: 680 },
+    { color: 'Yellow', dir: 'left',  x: 160, y: 810 },
+  ];
+  await Promise.all(colors.map(async ({ color, dir, x, y }) => {
+    const lc = color.toLowerCase();
+    const img = await loadImg(`/Assets/Images/Player/${color}/${lc}_${dir}_walk/step1.png`);
+    if (img) {
+      const pw = 48, ph = Math.round(48 * img.naturalHeight / img.naturalWidth);
+      ctx.drawImage(img, x, y, pw, ph);
+    }
+  }));
+
+  // ── HUD: Task bar ───────────────────────────────────────────────
+  ctx.fillStyle = 'rgba(0,0,0,0.55)';
+  ctx.fillRect(10, 40, 220, 160);
+  ctx.strokeStyle = '#334';
+  ctx.lineWidth = 1.5;
+  ctx.strokeRect(10, 40, 220, 160);
+
+  ctx.font = 'bold 13px Arial';
+  ctx.fillStyle = '#aac';
+  ctx.fillText('TASKS', 22, 60);
+
+  const tasks = [
+    { name: 'Fix Wiring',       done: true  },
+    { name: 'Stabilize Nav',    done: true  },
+    { name: 'Reboot Wifi',      done: false },
+    { name: 'Fuel Engine',      done: false },
+    { name: 'Start Reactor',    done: false },
+    { name: 'Align Engine',     done: false },
+    { name: 'Empty Garbage',    done: false },
+    { name: 'Clear Asteroids',  done: false },
+  ];
+
+  // Task progress bar
+  const done = tasks.filter(t => t.done).length;
+  ctx.fillStyle = '#223';
+  ctx.fillRect(22, 68, 190, 10);
+  ctx.fillStyle = '#4af';
+  ctx.fillRect(22, 68, 190 * done / tasks.length, 10);
+
+  ctx.font = '11px Arial';
+  tasks.forEach((t, i) => {
+    const ty = 90 + i * 14;
+    ctx.fillStyle = t.done ? '#5f5' : '#88a';
+    ctx.fillText((t.done ? '✓ ' : '○ ') + t.name, 22, ty);
+  });
+
+  // ── HUD: Minimap ────────────────────────────────────────────────
+  const mini = await loadImg('/Assets/Maps/mini_map3.png');
+  const mx = W - 145, my = 30, msize = 130;
+  ctx.fillStyle = 'rgba(0,0,0,0.6)';
+  ctx.fillRect(mx - 5, my - 5, msize + 10, msize + 10);
+  if (mini) {
+    ctx.drawImage(mini, mx, my, msize, msize);
+  }
+  // Player dot on minimap
+  ctx.fillStyle = '#4af';
+  ctx.beginPath();
+  ctx.arc(mx + msize * 0.42, my + msize * 0.58, 4, 0, Math.PI * 2);
+  ctx.fill();
+
+  // ── HUD: bottom action buttons (portrait UI) ────────────────────
+  // Emergency button area
+  ctx.fillStyle = 'rgba(220,60,60,0.85)';
+  roundRect(ctx, 30, H - 110, 90, 90, 12);
+  ctx.fill();
+  ctx.font = 'bold 10px Arial';
+  ctx.fillStyle = '#fff';
+  ctx.textAlign = 'center';
+  ctx.fillText('EMERGENCY', 75, H - 62);
+  ctx.fillText('MEETING', 75, H - 50);
+
+  // Use/Interact button
+  ctx.fillStyle = 'rgba(40,180,80,0.85)';
+  roundRect(ctx, 630, H - 110, 90, 90, 12);
+  ctx.fill();
+  ctx.font = 'bold 14px Arial';
+  ctx.fillStyle = '#fff';
+  ctx.fillText('USE', 675, H - 62);
+
+  ctx.textAlign = 'left';
+
+  // ── Player name tag ─────────────────────────────────────────────
+  ctx.font = 'bold 12px Arial';
+  ctx.fillStyle = '#fff';
+  ctx.textAlign = 'center';
+  ctx.fillText('Astro', 316, 737);
+  ctx.textAlign = 'left';
+
+  // ── Virtual joystick ────────────────────────────────────────────
+  ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(150, H - 160, 55, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.fillStyle = 'rgba(255,255,255,0.12)';
+  ctx.beginPath();
+  ctx.arc(165, H - 170, 28, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.arcTo(x + w, y, x + w, y + r, r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.arcTo(x + w, y + h, x + w - r, y + h, r);
+  ctx.lineTo(x + r, y + h);
+  ctx.arcTo(x, y + h, x, y + h - r, r);
+  ctx.lineTo(x, y + r);
+  ctx.arcTo(x, y, x + r, y, r);
+  ctx.closePath();
+}
+
+draw();
+</script>
+</body>
+</html>

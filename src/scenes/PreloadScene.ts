@@ -57,6 +57,7 @@ export class PreloadScene extends Phaser.Scene {
     const mockTaskData  = { gameScene: mockGameScene, taskId: 'preview' };
 
     if      (p === 'GameScene')       { this.registry.set('playerColor','Blue'); this.registry.set('playerName','Astro'); this.scene.start('GamePreloadScene'); }
+    else if (p === 'GameSceneFast')   { this.registry.set('playerColor','Blue'); this.registry.set('playerName','Astro'); this.registry.set('fastMode', true); this.scene.start('GamePreloadScene'); }
     else if (p === 'VictoryCrew')     { this.scene.start('VictoryScene', { winner:'crew',     tasksDone:8, impostorName:'Red' }); }
     else if (p === 'VictoryImpostor') { this.scene.start('VictoryScene', { winner:'impostor', tasksDone:3, impostorName:'Red' }); }
     else if (p === 'FixWiring')       { this.scene.start('FixWiringScene',    mockTaskData); }

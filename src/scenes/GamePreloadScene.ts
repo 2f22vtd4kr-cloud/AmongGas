@@ -42,6 +42,34 @@ export class GamePreloadScene extends Phaser.Scene {
 
   preload() {
     const { width: W, height: H } = this.scale;
+    const fastMode = !!this.registry.get('fastMode');
+
+    // ── Fast mode: load only essentials for a gameplay screenshot ──
+    if (fastMode) {
+      this.load.image('map_bg',  'Assets/Maps/map2back.png');
+      this.load.text('map_tmx',  'Assets/Maps/map_final.backv2.tmx');
+      this.load.image('minimap', 'Assets/Maps/mini_map3.png');
+      for (const dir of WALK_DIRS) {
+        for (let f = 1; f <= FRAME_COUNT[dir as keyof typeof FRAME_COUNT]; f++) {
+          this.load.image(`blue_${dir}_${f}`, `Assets/Images/Player/Blue/blue_${dir}_walk/step${f}.png`);
+        }
+      }
+      this.load.image('blue_ghost_1', 'Assets/Images/Player/Blue/blue_ghost/step1_left.png');
+      this.load.image('blue_ghost_2', 'Assets/Images/Player/Blue/blue_ghost/step1_right.png');
+      this.load.image('dead_blue', 'Assets/Images/Player/Dead/Deadblue.png');
+      this.load.image('light_mask', 'Assets/Images/Environment/light_350_med.png');
+      this.load.image('ui_map_button',     'Assets/Images/UI/map_button.png');
+      this.load.image('ui_kill_icon',      'Assets/Images/UI/kill_icon.png');
+      this.load.image('ui_kill_icon_dim',  'Assets/Images/UI/kill_icon_dim.png');
+      this.load.image('ui_emergency_icon', 'Assets/Images/UI/emergency_icon.png');
+      this.load.image('ui_emergency_dim',  'Assets/Images/UI/emergency_icon_dim.png');
+      this.load.image('ui_sabotage_icon',  'Assets/Images/UI/sabotage_icon.png');
+      this.load.image('ui_sabotage_dim',   'Assets/Images/UI/sabotage_icon_dim.png');
+      this.load.image('ui_close',          'Assets/Images/UI/close.PNG');
+      this.load.audio('sfx_roundstart', 'Assets/Sounds/General/roundstart.wav');
+      // Stub remaining keys as 1×1 pixel so GameScene doesn't crash on missing textures
+      return;
+    }
 
     // ── Purge stale player textures from cache ────────────────────
     // If a previous game session used runtime recoloring, Phaser's in-memory
