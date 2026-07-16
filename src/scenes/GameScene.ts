@@ -1012,22 +1012,24 @@ export class GameScene extends Phaser.Scene {
     ctx.clearRect(0, 0, W, H);
 
     // ── Step 1: full-screen darkness ─────────────────────────────────────────
-    // Original AU uses ~55 % opacity so map geometry (floor tiles, table shapes)
-    // shows through the fog — matching the grey "unlit" look in the original.
-    // Wall-shadow areas get a second near-opaque pass in Step 3, so they stay
-    // nearly black even though the base fog is lighter.
-    ctx.fillStyle = 'rgba(10,10,10,0.55)';
+    // Original AU uses a dark navy/blue-gray overlay (~82 % opacity) so map
+    // geometry (floor tiles, wall outlines) barely shows through — matching
+    // the cool "unlit" look of the original game. Wall-shadow areas get a
+    // second near-opaque pass in Step 3 so they stay very dark.
+    ctx.fillStyle = 'rgba(0,12,30,0.82)';
     ctx.fillRect(0, 0, W, H);
 
     // ── Step 2: erase a soft disc of light at the player ─────────────────────
     // Radial gradient (destination-out): alpha=1 erases the dark fog completely,
     // alpha=0 leaves it untouched. The colour value (black) doesn't matter for
     // destination-out — only the alpha channel is used to punch out the fog.
+    // The solid core extends to 85 % of the radius so the edge is crisp (like
+    // the original), with only a short 15 % soft falloff zone at the boundary.
     ctx.globalCompositeOperation = 'destination-out';
     const grad = ctx.createRadialGradient(sx, sy, 0, sx, sy, visionR * 1.2);
     grad.addColorStop(0,    'rgba(0,0,0,1)'); // fully bright at player centre
-    grad.addColorStop(0.60, 'rgba(0,0,0,1)'); // still fully bright at 60 % of radius
-    grad.addColorStop(1.0,  'rgba(0,0,0,0)'); // fades to nothing at 1.2× radius
+    grad.addColorStop(0.85, 'rgba(0,0,0,1)'); // still fully bright at 85 % of radius
+    grad.addColorStop(1.0,  'rgba(0,0,0,0)'); // short soft fade at the very edge
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, W, H);
 
@@ -1042,7 +1044,7 @@ export class GameScene extends Phaser.Scene {
     );
     if (worldPoly.length >= 3) {
       ctx.globalCompositeOperation = 'source-over';
-      ctx.fillStyle = 'rgba(10,10,10,0.97)';
+      ctx.fillStyle = 'rgba(0,8,20,0.97)'; // deep navy, nearly opaque wall shadows
       const toSx = (wx: number) => (wx - cam.worldView.x) * cam.zoom;
       const toSy = (wy: number) => (wy - cam.worldView.y) * cam.zoom;
       ctx.beginPath();

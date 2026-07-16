@@ -9,7 +9,7 @@ description: How the fog-of-war works in GameScene — native Canvas 2D offscree
 An offscreen `HTMLCanvasElement` (`fogCanvas`, 750×1334) is composited onto the live Phaser game canvas each frame via the `uiCamera.prerender` event (fires after the world camera has drawn, before the HUD camera draws its objects). Phaser is forced to Canvas renderer in `main.ts`; never switch to WebGL or `getContext('2d')` on the game canvas returns null.
 
 ## Four-step render (renderFogCanvas in GameScene.ts)
-1. Fill offscreen with near-opaque darkness (`rgba(10,10,10,0.96)`).
+1. Fill offscreen with dark navy overlay (`rgba(0,12,30,0.82)`) — cool blue-tinted, 82% opaque so floor tiles barely show through. Wall-shadow areas get a second near-opaque pass in step 3.
 2. `destination-out` radial gradient punches a soft disc of light at the player's screen position. Gradient stops: opaque 0→60% of `visionR*1.2`, fades to transparent at `visionR*1.2`.
 3. `source-over` even-odd fill re-darkens wall-shadow areas: path = full-canvas rect + visibility polygon. Even-odd fills the region *outside* the polygon → hard shadow edges where walls block sight.
 4. `gameCtx.save()` / `drawImage(fogCanvas, 0, 0)` / `gameCtx.restore()` blits onto the live canvas. Always save/restore and set `globalCompositeOperation = 'source-over'` and identity transform before drawing — Phaser may leave the context in a non-default state.
