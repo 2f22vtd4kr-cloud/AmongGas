@@ -355,15 +355,18 @@ export class GamePreloadScene extends Phaser.Scene {
 
     this.scene.start('GameScene');
 
-    // Keep the network busy with staggered pings so networkidle doesn't fire
-    // until after Phaser has rendered several frames (screenshot tooling only).
-    if (new URLSearchParams(window.location.search).get('debugNoFog')) {
-      (async () => {
-        for (let i = 0; i < 8; i++) {
-          await new Promise<void>(r => setTimeout(r, 500));
-          try { await fetch(`/favicon.ico?_ping=${i}`); } catch (_) {}
-        }
-      })();
+    // Keep the network busy so networkidle doesn't fire until the game has
+    // rendered frames and the canvas capture has been taken.
+    // Triggered by ?debugNoFog OR by any ?autoplay=… mode.
+    const isScreenshotMode =
+      new URLSearchParams(window.location.search).get('debugNoFog') !== null ||
+      (this.registry.get('autoplay') !== undefined && this.registry.get('autoplay') !== null && this.registry.get('autoplay') !== '');
+    if (isScreenshotMode) {
+      // Fire the long-poll hold IMMEDIATELY (delay=0) so the network is still
+      // "busy" when the last asset-load request completes — this prevents the
+      // Screenshot tool's networkidle timer from firing too early.
+      // /dev/ping-hold waits 10 s then responds, giving the game time to render.
+      fetch('/dev/ping-hold').catch(() => {});
     }
   }
 }

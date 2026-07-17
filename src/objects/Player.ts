@@ -11,6 +11,8 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
   public isImpostor = false;
   public tasksCompleted = 0;
   public lastDirection: Direction = 'down';
+  /** Set by autoplay / screenshot-tour to drive movement without keyboard input. */
+  public autoVelocity: { vx: number; vy: number } | null = null;
 
   private lastStep = 0;
   private nameLabel: Phaser.GameObjects.Text;
@@ -85,6 +87,17 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
     if (vx !== 0 && vy !== 0) {
       vx *= 0.7071;
       vy *= 0.7071;
+    }
+
+    // Autoplay override: drive player programmatically for screenshot tours
+    if (this.autoVelocity) {
+      vx = this.autoVelocity.vx;
+      vy = this.autoVelocity.vy;
+      if (Math.abs(vx) >= Math.abs(vy)) {
+        if (vx !== 0) this.lastDirection = vx > 0 ? 'right' : 'left';
+      } else {
+        if (vy !== 0) this.lastDirection = vy > 0 ? 'down' : 'up';
+      }
     }
 
     this.setVelocity(vx, vy);

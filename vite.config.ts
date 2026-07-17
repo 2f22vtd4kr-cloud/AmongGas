@@ -6,26 +6,89 @@ import path from 'node:path';
 // Dev-only plugin: receives the game canvas as a JPEG data-URL via POST
 // /dev/screenshot and writes it to screenshots/live_game.jpg so the agent
 // can read it as a real file.
+// Also serves GET /dev/screenshot as a live-image endpoint (shows the last
+// captured frame) and GET /dev/screenshot/wait which long-polls until a new
+// frame is posted (used by the relay page so networkidle fires only after the
+// game has finished rendering).
+let _lastScreenshotBuf: Buffer | null = null;
+let _waiters: Array<(buf: Buffer) => void> = [];
+
 const devScreenshotPlugin = {
   name: 'dev-screenshot',
   configureServer(server: any) {
+
+    // Long-poll hold: keeps the browser's network busy for ~10 s so the
+    // Screenshot tool's networkidle timer doesn't fire until the game has had
+    // time to render frames and POST the canvas capture.
+    server.middlewares.use('/dev/ping-hold', (_req: any, res: any) => {
+      setTimeout(() => {
+        res.setHeader('Content-Type', 'text/plain');
+        res.end('ok');
+      }, 10_000);
+    });
+
     server.middlewares.use('/dev/screenshot', (req: any, res: any) => {
-      if (req.method !== 'POST') { res.statusCode = 405; res.end(); return; }
-      let body = '';
-      req.on('data', (c: Buffer) => { body += c.toString(); });
-      req.on('end', () => {
-        try {
-          const { dataUrl } = JSON.parse(body);
-          const b64 = dataUrl.replace(/^data:image\/\w+;base64,/, '');
-          const outPath = path.resolve('screenshots/live_game.jpg');
-          fs.writeFileSync(outPath, Buffer.from(b64, 'base64'));
-          res.setHeader('Access-Control-Allow-Origin', '*');
-          res.setHeader('Content-Type', 'application/json');
-          res.end(JSON.stringify({ ok: true, path: outPath }));
-        } catch (e) {
-          res.statusCode = 500; res.end(String(e));
+      // ── POST: game sends canvas data ──────────────────────────────
+      if (req.method === 'POST') {
+        let body = '';
+        req.on('data', (c: Buffer) => { body += c.toString(); });
+        req.on('end', () => {
+          try {
+            const { dataUrl } = JSON.parse(body);
+            const b64 = dataUrl.replace(/^data:image\/\w+;base64,/, '');
+            const buf = Buffer.from(b64, 'base64');
+            _lastScreenshotBuf = buf;
+            // save to disk
+            fs.mkdirSync(path.resolve('screenshots'), { recursive: true });
+            fs.writeFileSync(path.resolve('screenshots/live_game.jpg'), buf);
+            // resolve any waiting long-poll GETs
+            for (const resolve of _waiters) resolve(buf);
+            _waiters = [];
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify({ ok: true }));
+          } catch (e) {
+            res.statusCode = 500; res.end(String(e));
+          }
+        });
+        return;
+      }
+
+      // ── GET /dev/screenshot/wait: long-poll until next capture ────
+      if (req.method === 'GET' && (req.url as string).includes('/wait')) {
+        const timeout = setTimeout(() => {
+          _waiters = _waiters.filter(r => r !== resolve);
+          res.statusCode = 204; res.end();
+        }, 30_000);
+        const resolve = (buf: Buffer) => {
+          clearTimeout(timeout);
+          res.setHeader('Content-Type', 'image/jpeg');
+          res.setHeader('Content-Length', buf.length);
+          res.end(buf);
+        };
+        _waiters.push(resolve);
+        return;
+      }
+
+      // ── GET /dev/screenshot: serve last captured frame ─────────────
+      if (req.method === 'GET') {
+        if (!_lastScreenshotBuf) {
+          // try disk fallback
+          try {
+            _lastScreenshotBuf = fs.readFileSync(path.resolve('screenshots/live_game.jpg'));
+          } catch (_) {}
         }
-      });
+        if (_lastScreenshotBuf) {
+          res.setHeader('Content-Type', 'image/jpeg');
+          res.setHeader('Content-Length', _lastScreenshotBuf.length);
+          res.end(_lastScreenshotBuf);
+        } else {
+          res.statusCode = 404; res.end('No screenshot yet');
+        }
+        return;
+      }
+
+      res.statusCode = 405; res.end();
     });
   },
 };

@@ -54,6 +54,21 @@ export class MenuScene extends Phaser.Scene {
   }
 
   create() {
+    // ── Autoplay / screenshot-tour mode: ?autoplay=… skips all menus ──────────────
+    // Supported values: '1' (walk), 'task' (open fix-wiring), 'meeting', 'minimap'
+    // Uses fastMode so only Blue player sprites are loaded — reduces loading time
+    // from ~12 s to ~2 s so the Screenshot tool captures GameScene, not the bar.
+    const autoplayParam = new URLSearchParams(window.location.search).get('autoplay');
+    if (autoplayParam !== null) {
+      this.registry.set('playerName', 'Player');
+      this.registry.set('playerColor', 'Blue');  // only Blue sprites loaded in fastMode
+      this.registry.set('gameMode', 'Freeplay');
+      this.registry.set('autoplay', autoplayParam);
+      this.registry.set('fastMode', true);        // skips audio + non-Blue player art
+      this.scene.start('GamePreloadScene');
+      return;
+    }
+
     // ── Deep-link auto-join: Telegram opened this Mini App via t.me/Bot?startapp=CODE ──
     // Skip all menus and jump straight to LobbyScene with defaults so the
     // player lands in the invited room immediately.

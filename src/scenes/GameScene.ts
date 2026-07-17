@@ -449,44 +449,74 @@ export class GameScene extends Phaser.Scene {
       this.sound.play('sfx_roundstart', { volume: 0.8 });
     });
 
-    // Dev screenshot tooling: capture the canvas in postrender (after Phaser
-    // has fully drawn the frame) and POST it to the Vite dev server.
-    if (new URLSearchParams(window.location.search).get('debugNoFog')) {
-      let captured = false;
-      let frameCount = 0;
-      this.game.events.on('postrender', () => {
-        if (captured) return;
-        frameCount++;
-        // After 5 frames, log a center-pixel probe so we can see what Phaser
-        // is actually rendering to the canvas.
-        if (frameCount === 5) {
-          try {
-            const ctx = this.game.canvas.getContext('2d')!;
-            const W = this.game.canvas.width;
-            const H = this.game.canvas.height;
-            const p = ctx.getImageData(W >> 1, H >> 1, 1, 1).data;
-            console.log(`[debug] canvas center px @frame5 RGBA(${p[0]},${p[1]},${p[2]},${p[3]}) canvas=${W}x${H}`);
-            const pl = ctx.getImageData(0, H >> 1, 1, 1).data;
-            console.log(`[debug] canvas left   px @frame5 RGBA(${pl[0]},${pl[1]},${pl[2]},${pl[3]})`);
-            const cc = this.cameras.main;
-            console.log(`[debug] main camera scroll=(${cc.scrollX.toFixed(0)},${cc.scrollY.toFixed(0)}) zoom=${cc.zoom}`);
-            const bg = this.children.getByName('map_bg') ?? this.children.list[0];
-            if (bg) console.log(`[debug] first child: ${bg.constructor.name} visible=${(bg as any).visible} alpha=${(bg as any).alpha}`);
-          } catch (e) { console.warn('[debug] pixel probe error', e); }
-        }
-        // Wait 60 frames before capturing the final screenshot.
-        if (frameCount < 60) return;
-        captured = true;
+    // Dev screenshot tooling: capture the canvas and POST it to the Vite dev server.
+    // Triggered by ?debugNoFog OR by ?autoplay=… modes.
+    // Uses a chain of setTimeout calls (not postrender) so it works regardless
+    // of whether Phaser's render loop emits events in the Screenshot tool's browser.
+    const _autoplayMode = this.registry.get('autoplay') as string | undefined;
+    const _isCapture = new URLSearchParams(window.location.search).get('debugNoFog') !== null ||
+      (_autoplayMode !== undefined && _autoplayMode !== null && _autoplayMode !== '');
+    if (_isCapture) {
+      // Probe canvas dimensions immediately from create() to help diagnose sizing issues.
+      console.log('[capture] create() canvas=', this.game.canvas.width, 'x', this.game.canvas.height,
+        ' scale.gameSize=', this.scale.gameSize.width, 'x', this.scale.gameSize.height);
+
+      // Capture at 3 s (after autoplay walk has started) using setTimeout so this
+      // works even when Phaser's render loop is throttled in headless mode.
+      const doCapture = (label: string) => {
+        const gCanvas = this.game.canvas;
+        const W = gCanvas.width;
+        const H = gCanvas.height;
+        console.log(`[capture] ${label} canvas=${W}x${H}`);
+
         try {
-          const dataUrl = this.game.canvas.toDataURL('image/jpeg', 0.92);
+          // If the backing canvas is too small (headless Scale.FIT quirk), use a
+          // fixed-size intermediate canvas sized to the design resolution instead.
+          const targetW = W > 100 ? W : (this.scale.gameSize.width  || 750);
+          const targetH = H > 100 ? H : (this.scale.gameSize.height || 1334);
+
+          let dataUrl: string;
+          if (W > 100 && H > 100) {
+            dataUrl = gCanvas.toDataURL('image/jpeg', 0.92);
+          } else {
+            // Canvas is too small — try drawing into an explicit-size tmp canvas.
+            const tmp = document.createElement('canvas');
+            tmp.width  = targetW;
+            tmp.height = targetH;
+            const tc = tmp.getContext('2d')!;
+            tc.fillStyle = '#1a0a2e'; // game background colour
+            tc.fillRect(0, 0, targetW, targetH);
+            tc.drawImage(gCanvas, 0, 0, targetW, targetH);
+            dataUrl = tmp.toDataURL('image/jpeg', 0.92);
+            console.log(`[capture] used tmp canvas ${targetW}x${targetH}, dataUrl len=${dataUrl.length}`);
+          }
+
+          // Also log a pixel probe so we can tell what colour the canvas is.
+          try {
+            const ctx = gCanvas.getContext('2d');
+            if (ctx && W > 0 && H > 0) {
+              const mid = ctx.getImageData(W >> 1, H >> 1, 1, 1).data;
+              console.log(`[capture] center pixel RGBA(${mid[0]},${mid[1]},${mid[2]},${mid[3]})`);
+            }
+          } catch (_) {}
+
           fetch('/dev/screenshot', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ dataUrl }),
           }).catch(() => {});
           document.body.setAttribute('data-game-ready', 'true');
-        } catch (_) {}
-      });
+        } catch (e) {
+          console.warn('[capture] failed:', e);
+        }
+      };
+
+      // Capture at multiple intervals while the ping-hold keeps the network busy.
+      // /dev/ping-hold responds after 10 s from GamePreloadScene.create(), so
+      // all three captures fire well within that window.
+      setTimeout(() => doCapture('t=1s'), 1000);
+      setTimeout(() => doCapture('t=3s'), 3000);
+      setTimeout(() => doCapture('t=7s'), 7000);
     }
 
     // ── Impostor AI timers (Freeplay only — multiplayer kills/sabotage are server-driven) ──
@@ -518,6 +548,112 @@ export class GameScene extends Phaser.Scene {
     this.input.keyboard!.on('keydown-ESC', () => {
       if (this.miniMapOverlay) { this.closeMiniMap(); return; }
     });
+
+    // ── Autoplay / screenshot-tour ──
+    const autoplayMode = this.registry.get('autoplay') as string | undefined;
+    if (autoplayMode !== undefined && autoplayMode !== null && autoplayMode !== '') {
+      this.startAutoplay(autoplayMode);
+    }
+  }
+
+  /**
+   * Drives the player automatically for screenshot tours.
+   * Activated by ?autoplay=<mode> URL param (set via registry by MenuScene).
+   *
+   * Modes:
+   *   '1' | 'walk' — walk around the spawn area for ~8 s then stop
+   *   'task'       — teleport to the wiring task and open it
+   *   'meeting'    — walk for 3 s then trigger an emergency meeting
+   *   'minimap'    — walk for 2 s then open the minimap
+   */
+  private startAutoplay(mode: string) {
+    const S = PLAYER_SPEED;
+
+    // For walk/meeting/minimap modes: teleport to the cafeteria centre so the
+    // screenshot shows a colourful room, not the transparent outer-space area
+    // where PLAYER_SPAWN (4528, 1712) sits in the map PNG.
+    if (mode !== 'task') {
+      this.player?.setPosition(3277, 658);
+      // Snap the camera immediately (bypass lerp) so it's on the cafeteria even
+      // at the first capture frame (t=1 s). Without this it lerps slowly from
+      // PLAYER_SPAWN and still shows transparent space at t=1 s.
+      this.cameras.main.stopFollow();
+      this.cameras.main.scrollX = 3277 - (750 / 2 / CAMERA_ZOOM);
+      this.cameras.main.scrollY = 658  - (1334 / 2 / CAMERA_ZOOM);
+      this.cameras.main.startFollow(this.player, true, 0.12, 0.12);
+    }
+
+    // Basic walk sequence — used by most modes
+    const walkSteps: Array<{ delay: number; vx: number; vy: number }> = [
+      { delay: 200,  vx:  S, vy: 0 },   // walk right
+      { delay: 2200, vx:  0, vy: S },   // walk down
+      { delay: 3700, vx: -S, vy: 0 },   // walk left
+      { delay: 5700, vx:  0, vy: -S },  // walk up
+      { delay: 7200, vx:  0, vy: 0 },   // stop
+    ];
+
+    if (mode === 'task') {
+      // Teleport to the electricity_wires task (Fix Wiring) and open it
+      this.time.delayedCall(300, () => {
+        if (!this.player?.active) return;
+        // Task is in the electrical room — cx≈2191, cy≈1672
+        this.player.setPosition(2191, 1672);
+        this.player.autoVelocity = null;
+      });
+      // After detectNearby() has had time to run (2 frames @ 60 fps ≈ 33 ms),
+      // open the task.
+      this.time.delayedCall(600, () => {
+        if (!this.player?.active) return;
+        this.tryInteract();
+      });
+      return;
+    }
+
+    if (mode === 'meeting') {
+      // Walk for 3 s then trigger emergency meeting
+      const meetingSteps = walkSteps.slice(0, 2);
+      for (const s of meetingSteps) {
+        this.time.delayedCall(s.delay, () => {
+          if (this.player?.active) {
+            this.player.autoVelocity = s.vx === 0 && s.vy === 0 ? null : { vx: s.vx, vy: s.vy };
+          }
+        });
+      }
+      this.time.delayedCall(3200, () => {
+        if (!this.player?.active || this.gameOver) return;
+        this.player.autoVelocity = null;
+        // Trigger the meeting directly (no proximity check needed for the button)
+        this.triggerEmergency(false);
+      });
+      return;
+    }
+
+    if (mode === 'minimap') {
+      // Walk briefly then open minimap
+      const mapSteps = walkSteps.slice(0, 2);
+      for (const s of mapSteps) {
+        this.time.delayedCall(s.delay, () => {
+          if (this.player?.active) {
+            this.player.autoVelocity = s.vx === 0 && s.vy === 0 ? null : { vx: s.vx, vy: s.vy };
+          }
+        });
+      }
+      this.time.delayedCall(2500, () => {
+        if (!this.player?.active) return;
+        this.player.autoVelocity = null;
+        this.toggleMiniMap();
+      });
+      return;
+    }
+
+    // Default / '1' / 'walk' — run the full walk sequence
+    for (const s of walkSteps) {
+      this.time.delayedCall(s.delay, () => {
+        if (this.player?.active) {
+          this.player.autoVelocity = s.vx === 0 && s.vy === 0 ? null : { vx: s.vx, vy: s.vy };
+        }
+      });
+    }
   }
 
   // ────────────────── Safe-area ──────────────────
@@ -965,7 +1101,7 @@ export class GameScene extends Phaser.Scene {
     // Do NOT clear before the UI camera renders — the main camera already drew
     // the world to the canvas, and clearing here would erase it. The UI camera
     // only needs to composite HUD objects on top of the existing frame.
-    this.uiCamera.clearBeforeRender = false;
+    (this.uiCamera as unknown as { clearBeforeRender: boolean }).clearBeforeRender = false;
 
     const hudObjects: Phaser.GameObjects.GameObject[] = [
       this.hud, this.emergencyBtn, this.miniMapBtn, this.interactPrompt,
