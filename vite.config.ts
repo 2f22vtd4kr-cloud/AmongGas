@@ -1,5 +1,34 @@
 import { defineConfig } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
+import fs from 'node:fs';
+import path from 'node:path';
+
+// Dev-only plugin: receives the game canvas as a JPEG data-URL via POST
+// /dev/screenshot and writes it to screenshots/live_game.jpg so the agent
+// can read it as a real file.
+const devScreenshotPlugin = {
+  name: 'dev-screenshot',
+  configureServer(server: any) {
+    server.middlewares.use('/dev/screenshot', (req: any, res: any) => {
+      if (req.method !== 'POST') { res.statusCode = 405; res.end(); return; }
+      let body = '';
+      req.on('data', (c: Buffer) => { body += c.toString(); });
+      req.on('end', () => {
+        try {
+          const { dataUrl } = JSON.parse(body);
+          const b64 = dataUrl.replace(/^data:image\/\w+;base64,/, '');
+          const outPath = path.resolve('screenshots/live_game.jpg');
+          fs.writeFileSync(outPath, Buffer.from(b64, 'base64'));
+          res.setHeader('Access-Control-Allow-Origin', '*');
+          res.setHeader('Content-Type', 'application/json');
+          res.end(JSON.stringify({ ok: true, path: outPath }));
+        } catch (e) {
+          res.statusCode = 500; res.end(String(e));
+        }
+      });
+    });
+  },
+};
 
 export default defineConfig({
   server: {
@@ -12,6 +41,7 @@ export default defineConfig({
   },
   assetsInclude: ['**/*.tmx', '**/*.TTF'],
   plugins: [
+    devScreenshotPlugin,
     VitePWA({
       registerType: 'autoUpdate',
       // Enable the service worker in dev mode so offline works without a

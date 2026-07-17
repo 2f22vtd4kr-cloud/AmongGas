@@ -69,7 +69,22 @@ const config: Phaser.Types.Core.GameConfig = {
   audio: {
     disableWebAudio: false,
   },
+  // Use setTimeout-based loop so the game keeps running even when the browser
+  // tab is not focused — required for screenshot capture tools that load the
+  // page in a background/headless context where rAF is throttled.
+  fps: {
+    forceSetTimeOut: true,
+  },
 };
+
+// Override the Page Visibility API to always report 'visible' — Phaser's
+// Canvas renderer skips the render pipeline when document.visibilityState is
+// 'hidden', which happens in the Screenshot tool's headless/background context.
+// This fix makes the renderer always draw regardless of OS-level focus state.
+try {
+  Object.defineProperty(document, 'visibilityState', { get: () => 'visible', configurable: true });
+  Object.defineProperty(document, 'hidden', { get: () => false, configurable: true });
+} catch (_) {}
 
 // Telegram Mini App bootstrap — safe to call even outside Telegram
 type TgWebApp = {
@@ -86,6 +101,13 @@ if (tg) {
 }
 
 const game = new Phaser.Game(config);
+
+// Prevent Phaser from pausing the game loop when the browser tab loses focus
+// or the page visibility changes — required for screenshot capture tools that
+// load the page in a background context.
+// 'pause' fires after Phaser has already set its paused flag; resuming here
+// immediately cancels the pause so rendering continues every tick.
+game.events.on('pause', () => { game.resume(); });
 
 // Hide HTML loading screen once Phaser is ready
 game.events.once('ready', () => {

@@ -449,6 +449,46 @@ export class GameScene extends Phaser.Scene {
       this.sound.play('sfx_roundstart', { volume: 0.8 });
     });
 
+    // Dev screenshot tooling: capture the canvas in postrender (after Phaser
+    // has fully drawn the frame) and POST it to the Vite dev server.
+    if (new URLSearchParams(window.location.search).get('debugNoFog')) {
+      let captured = false;
+      let frameCount = 0;
+      this.game.events.on('postrender', () => {
+        if (captured) return;
+        frameCount++;
+        // After 5 frames, log a center-pixel probe so we can see what Phaser
+        // is actually rendering to the canvas.
+        if (frameCount === 5) {
+          try {
+            const ctx = this.game.canvas.getContext('2d')!;
+            const W = this.game.canvas.width;
+            const H = this.game.canvas.height;
+            const p = ctx.getImageData(W >> 1, H >> 1, 1, 1).data;
+            console.log(`[debug] canvas center px @frame5 RGBA(${p[0]},${p[1]},${p[2]},${p[3]}) canvas=${W}x${H}`);
+            const pl = ctx.getImageData(0, H >> 1, 1, 1).data;
+            console.log(`[debug] canvas left   px @frame5 RGBA(${pl[0]},${pl[1]},${pl[2]},${pl[3]})`);
+            const cc = this.cameras.main;
+            console.log(`[debug] main camera scroll=(${cc.scrollX.toFixed(0)},${cc.scrollY.toFixed(0)}) zoom=${cc.zoom}`);
+            const bg = this.children.getByName('map_bg') ?? this.children.list[0];
+            if (bg) console.log(`[debug] first child: ${bg.constructor.name} visible=${(bg as any).visible} alpha=${(bg as any).alpha}`);
+          } catch (e) { console.warn('[debug] pixel probe error', e); }
+        }
+        // Wait 60 frames before capturing the final screenshot.
+        if (frameCount < 60) return;
+        captured = true;
+        try {
+          const dataUrl = this.game.canvas.toDataURL('image/jpeg', 0.92);
+          fetch('/dev/screenshot', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ dataUrl }),
+          }).catch(() => {});
+          document.body.setAttribute('data-game-ready', 'true');
+        } catch (_) {}
+      });
+    }
+
     // ── Impostor AI timers (Freeplay only — multiplayer kills/sabotage are server-driven) ──
     if (!this.isMultiplayer) {
       this.time.addEvent({
@@ -922,6 +962,10 @@ export class GameScene extends Phaser.Scene {
   private setupUiCamera() {
     const { width: W, height: H } = this.scale;
     this.uiCamera = this.cameras.add(0, 0, W, H);
+    // Do NOT clear before the UI camera renders — the main camera already drew
+    // the world to the canvas, and clearing here would erase it. The UI camera
+    // only needs to composite HUD objects on top of the existing frame.
+    this.uiCamera.clearBeforeRender = false;
 
     const hudObjects: Phaser.GameObjects.GameObject[] = [
       this.hud, this.emergencyBtn, this.miniMapBtn, this.interactPrompt,
@@ -1008,6 +1052,7 @@ export class GameScene extends Phaser.Scene {
   private renderFogCanvas() {
     if (!this.fogCtx || !this.fogCanvas || !this.player) return;
     if (!this.player.isAlive) return;
+    if (new URLSearchParams(window.location.search).get('debugNoFog')) return;
 
     const cam  = this.cameras.main;
     const W    = this.fogCanvas.width;

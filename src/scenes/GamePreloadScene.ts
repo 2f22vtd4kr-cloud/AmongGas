@@ -354,5 +354,16 @@ export class GamePreloadScene extends Phaser.Scene {
     }
 
     this.scene.start('GameScene');
+
+    // Keep the network busy with staggered pings so networkidle doesn't fire
+    // until after Phaser has rendered several frames (screenshot tooling only).
+    if (new URLSearchParams(window.location.search).get('debugNoFog')) {
+      (async () => {
+        for (let i = 0; i < 8; i++) {
+          await new Promise<void>(r => setTimeout(r, 500));
+          try { await fetch(`/favicon.ico?_ping=${i}`); } catch (_) {}
+        }
+      })();
+    }
   }
 }
