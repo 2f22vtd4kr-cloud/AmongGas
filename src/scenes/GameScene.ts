@@ -381,7 +381,11 @@ export class GameScene extends Phaser.Scene {
     }
 
     // ── Player ──
-    this.player = new Player(this, PLAYER_SPAWN.x, PLAYER_SPAWN.y, playerColor, playerName);
+    const debugSpawn = this.registry.get('debugSpawn') as string | undefined;
+    const spawnPos = (debugSpawn === 'cafeteria')
+      ? AMBIENT_CENTRES.cafeteria  // world centre of cafeteria room
+      : PLAYER_SPAWN;
+    this.player = new Player(this, spawnPos.x, spawnPos.y, playerColor, playerName);
     this.playerWallCollider = this.physics.add.collider(this.player, this.walls);
 
     // Prevent bots from standing on top of the player
@@ -433,6 +437,12 @@ export class GameScene extends Phaser.Scene {
 
     // ── Fog of war ──
     this.setupFog();
+
+    // ── Debug overrides (URL ?preview=GameSceneCafe / GameSceneSabotage) ──
+    const debugSabotage = this.registry.get('debugSabotage') as string | undefined;
+    if (debugSabotage === 'lights') {
+      this.sabotageType = 'lights';
+    }
 
     // ── Round start sound ──
     this.time.delayedCall(800, () => {

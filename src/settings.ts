@@ -46,8 +46,8 @@ export const REPORT_RADIUS = 150;
 // Impostor default: ~280 world units → ~406 px at zoom 1.45 (wider awareness)
 // Ghosts see the full map (no fog).
 export const NIGHT_COLOR  = 0x141414;
-export const CREW_VISION  = 420;   // world units — crewmate sight radius; covers the whole cafeteria (~270wu half-width) so you see the full room you're standing in, dark only at screen edges — matching AU default vision
-export const IMP_VISION   = 590;   // world units — impostor sight radius (~1.4× crew)
+export const CREW_VISION  = 550;   // world units — crewmate sight radius; must be > outermost cafeteria table edge (~430wu from centre) so the whole room is visible; disc extends beyond screen half-width (500wu) matching AU where room is fully lit
+export const IMP_VISION   = 770;   // world units — impostor sight radius (~1.4× crew)
 
 // Footstep rate (ms between steps)
 export const STEPPING_RATE = 230;

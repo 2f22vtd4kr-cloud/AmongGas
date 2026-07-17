@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Fog — cafeteria, exact game render</title>
+<style>
+  body { margin:0; background:#1a0a2e; display:flex; flex-direction:row; gap:0; }
+  .col { display:flex; flex-direction:column; align-items:center; padding:6px; }
+  h2 { color:#aaf; font:bold 13px monospace; margin:0 0 4px; text-align:center; }
+  canvas { display:block; border:1px solid #444; }
+</style>
+</head>
+<body>
+<script>
+// ── Exact constants from settings.ts ─────────────────────────────────────────
+const CAMERA_ZOOM           = 0.75;   // src/settings.ts CAMERA_ZOOM
+const CREW_VISION           = 550;    // normal state
+const CREW_VISION_SABOTAGED = 110;    // lights-out sabotage
+const GAME_W = 750, GAME_H = 1334;   // fixed canvas resolution
+
+// ── Player position: cafeteria centre (AMBIENT_CENTRES.cafeteria) ─────────
+const PX = 3277, PY = 658;
+
+// ── Wall rects that cast fog shadows near cafeteria (name="walls" in TMX) ─
+const WALLS = [
+  {"x":1673,"y":527,"width":923.333,"height":56},
+  {"x":2407,"y":775,"width":188.65,"height":88},
+  {"x":2596.17,"y":224.667,"width":76.6667,"height":359},
+  {"x":2777,"y":12.6667,"width":1016,"height":60.6667},
+  {"x":2595.67,"y":775.001,"width":75.197,"height":386.666}
+];
+
+// ── Visibility polygon (mirrors computeVisibilityPolygon in GameScene.ts) ──
+function raySegT(ox,oy,dx,dy,ax,ay,bx,by){
+  const rx=bx-ax,ry=by-ay,denom=dx*ry-dy*rx;
+  if(Math.abs(denom)<1e-10)return null;
+  const t=((ax-ox)*ry-(ay-oy)*rx)/denom;
+  const u=((ax-ox)*dy-(ay-oy)*dx)/denom;
+  if(t<-1e-10||u<-1e-10||u>1+1e-10)return null;
+  return t;
+}
+function circleSegAngles(px,py,r,ax,ay,bx,by){
+  const dx=bx-ax,dy=by-ay,ex=ax-px,ey=ay-py,a=dx*dx+dy*dy;
+  if(a<1e-10)return[];
+  const b=2*(ex*dx+ey*dy),c=ex*ex+ey*ey-r*r,disc=b*b-4*a*c;
+  if(disc<0)return[];
+  const sq=Math.sqrt(disc),out=[];
+  for(const t of[(-b-sq)/(2*a),(-b+sq)/(2*a)]){
+    if(t>1e-6&&t<1+1e-6){const tt=Math.min(t,1);out.push(Math.atan2(ay+tt*dy-py,ax+tt*dx-px));}
+  }
+  return out;
+}
+function computePoly(px,py,radius,walls){
+  const BDRY=64,E=0.0001;
+  const r15sq=radius*radius*2.25;
+  const nearby=walls.filter(w=>{
+    const cx=Math.max(w.x,Math.min(px,w.x+w.width)),cy=Math.max(w.y,Math.min(py,w.y+w.height));
+    return (cx-px)**2+(cy-py)**2<r15sq;
+  });
+  const segs=[],angles=[];
+  for(const w of nearby){
+    const x1=w.x,y1=w.y,x2=w.x+w.width,y2=w.y+w.height;
+    for(const[ax,ay,bx,by]of[[x1,y1,x2,y1],[x2,y1,x2,y2],[x2,y2,x1,y2],[x1,y2,x1,y1]]){
+      segs.push({ax,ay,bx,by});
+      for(const a of circleSegAngles(px,py,radius,ax,ay,bx,by))angles.push(a-E,a,a+E);
+    }
+    for(const[cx,cy]of[[x1,y1],[x2,y1],[x1,y2],[x2,y2]]){angles.push(Math.atan2(cy-py,cx-px)-E,Math.atan2(cy-py,cx-px),Math.atan2(cy-py,cx-px)+E);}
+  }
+  for(let i=0;i<BDRY;i++)angles.push(-Math.PI+(i/BDRY)*Math.PI*2);
+  const pts=[];
+  for(const angle of angles){
+    const ddx=Math.cos(angle),ddy=Math.sin(angle);let minT=radius;
+    for(const s of segs){const t=raySegT(px,py,ddx,ddy,s.ax,s.ay,s.bx,s.by);if(t!==null&&t>0&&t<minT)minT=t;}
+    pts.push({angle,x:px+ddx*minT,y:py+ddy*minT});
+  }
+  pts.sort((a,b)=>a.angle-b.angle);
+  return pts;
+}
+
+// ── Render exactly as renderFogCanvas() does in GameScene.ts ─────────────
+function renderPanel(cv, mapImg, px, py, visionWu) {
+  const ctx = cv.getContext('2d');
+  const zoom = CAMERA_ZOOM;
+
+  // Camera worldView centred on player
+  const viewW = GAME_W / zoom, viewH = GAME_H / zoom;
+  const camX = px - viewW / 2, camY = py - viewH / 2;
+
+  // Draw map background (crop + scale exactly as Phaser camera does)
+  ctx.drawImage(mapImg,
+    camX, camY, viewW, viewH,
+    0, 0, GAME_W, GAME_H
+  );
+
+  const sx = (px - camX) * zoom;   // always = GAME_W/2
+  const sy = (py - camY) * zoom;   // always = GAME_H/2
+  const visionR = visionWu * zoom; // screen pixels
+
+  const toSx = wx => (wx - camX) * zoom;
+  const toSy = wy => (wy - camY) * zoom;
+
+  // ── Fog composite (mirrors renderFogCanvas step-by-step) ──
+  const fog = document.createElement('canvas');
+  fog.width = GAME_W; fog.height = GAME_H;
+  const fc = fog.getContext('2d');
+
+  // Step 1: full-screen darkness 97 %
+  fc.fillStyle = 'rgba(0,0,0,0.97)';
+  fc.fillRect(0, 0, GAME_W, GAME_H);
+
+  // Step 2: erase a gradient disc of light
+  fc.globalCompositeOperation = 'destination-out';
+  const g = fc.createRadialGradient(sx, sy, 0, sx, sy, visionR * 1.2);
+  g.addColorStop(0,    'rgba(0,0,0,1)');
+  g.addColorStop(0.90, 'rgba(0,0,0,1)');
+  g.addColorStop(1.0,  'rgba(0,0,0,0)');
+  fc.fillStyle = g;
+  fc.fillRect(0, 0, GAME_W, GAME_H);
+
+  // Step 3: re-darken wall shadows (clipped to disc)
+  const poly = computePoly(px, py, visionR * 1.2 / zoom * 1, WALLS);  // radius in world units = visionR*1.2/zoom
+  if (poly.length >= 3) {
+    fc.save();
+    fc.beginPath();
+    fc.arc(sx, sy, visionR * 1.2, 0, Math.PI * 2);
+    fc.clip();
+    fc.globalCompositeOperation = 'source-over';
+    fc.fillStyle = 'rgba(0,0,0,0.97)';
+    fc.beginPath();
+    fc.rect(0, 0, GAME_W, GAME_H);
+    fc.moveTo(toSx(poly[0].x), toSy(poly[0].y));
+    for (let i = 1; i < poly.length; i++) fc.lineTo(toSx(poly[i].x), toSy(poly[i].y));
+    fc.closePath();
+    fc.fill('evenodd');
+    fc.restore();
+  }
+
+  // Step 4: composite onto display canvas
+  ctx.save();
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.drawImage(fog, 0, 0);
+  ctx.restore();
+
+  // Player dot (green)
+  ctx.beginPath();
+  ctx.arc(sx, sy, 8, 0, Math.PI * 2);
+  ctx.fillStyle = '#00ff66';
+  ctx.fill();
+  ctx.strokeStyle = '#ffffff';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+}
+
+// ── Display: two side-by-side panels scaled to 50 % ─────────────────────
+const SCALE = 0.50;
+const DW = Math.round(GAME_W * SCALE);   // 375
+const DH = Math.round(GAME_H * SCALE);  // 667
+
+function makePanel(title, visionWu, titleColor) {
+  const col = document.createElement('div');
+  col.className = 'col';
+  const h2 = document.createElement('h2');
+  h2.textContent = title;
+  h2.style.color = titleColor;
+  const cv = document.createElement('canvas');
+  cv.width = DW; cv.height = DH;
+  col.append(h2, cv);
+  document.body.append(col);
+  return { cv, visionWu };
+}
+
+const PANELS = [
+  makePanel(`NORMAL LIGHTING  — CREW_VISION = ${CREW_VISION} wu  (zoom ${CAMERA_ZOOM}×)`, CREW_VISION, '#4f4'),
+  makePanel(`LIGHTS OUT  — CREW_VISION_SABOTAGED = ${CREW_VISION_SABOTAGED} wu  (zoom ${CAMERA_ZOOM}×)`, CREW_VISION_SABOTAGED, '#f84'),
+];
+
+const img = new Image();
+img.onload = () => {
+  for (const { cv, visionWu } of PANELS) {
+    const offscreen = document.createElement('canvas');
+    offscreen.width = GAME_W; offscreen.height = GAME_H;
+    renderPanel(offscreen, img, PX, PY, visionWu);
+    cv.getContext('2d').drawImage(offscreen, 0, 0, DW, DH);
+  }
+};
+img.onerror = () => {
+  document.body.innerHTML += '<p style="color:red;font-family:monospace">Map image failed to load</p>';
+};
+img.src = '/Assets/Maps/map2back.png';
+</script>
+</body>
+</html>

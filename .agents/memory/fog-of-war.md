@@ -28,13 +28,16 @@ Compute polygon with `radius = (visionR * 1.2) / cam.zoom` (world units), NOT `v
 **Why:** The gradient's soft falloff zone runs from 85% to 100% of `visionR*1.2`. If the polygon only extends to `visionR`, the even-odd fill re-darkens the entire falloff zone, killing the soft edge. Using `visionR*1.2` as the polygon boundary matches the gradient's outer edge.
 
 ## Vision radii (settings.ts)
-- `CREW_VISION = 420` world units — covers the whole cafeteria (~270wu half-width) so you see the full room you're standing in; dark only at screen edges, matching real AU default. Do NOT reduce this — a smaller value makes rooms look truncated by a visible dark ring inside the room.
-- `IMP_VISION = 590` — ~1.4× crew
-- `CREW_VISION_SABOTAGED = 110` — lights-out "barely see your feet" glow (~3.4 tiles, ~26% of normal); the contrast between 420 and 110 is what makes the lights sabotage feel scary
+- `CREW_VISION = 550` world units — verified in-game via fog_cafeteria.html static test page; outermost cafeteria table edge is ~430wu from centre, 550wu covers it fully AND overflows the screen half-width (500wu), so there is no visible disc boundary at the screen sides, only at top/bottom corners — matching real AU.
+- `IMP_VISION = 770` — 1.4× crew
+- `CREW_VISION_SABOTAGED = 110` — lights-out "barely see your feet" glow (~3.4 tiles radius, ~20% of normal); disc barely covers the centre emergency table. Contrast between 550 and 110 makes the sabotage feel extreme.
 - `CAMERA_ZOOM = 0.75`
 
-## Critical sizing insight (learned from reference images)
-The vision radius must be ≥ the room half-width so the player sees the whole room from its center with no dark edges cutting into it. Cafeteria half-width ≈ 270wu → 420wu comfortably covers it. A value of 270wu creates a visible dark circle inside the room, which looks completely wrong vs real AU.
+## Critical sizing rules (verified by screenshot comparison against reference images)
+1. Vision radius must exceed the outermost room object (not just the wall boundary). Cafeteria table edges are at ~430wu from centre — 420wu clips the outer tables. 550wu covers them fully.
+2. Vision must exceed screen half-width (750/(2*0.75)=500wu) so the disc overflows left/right and there is no visible dark band inside the room.
+3. Do NOT reduce CREW_VISION below 500wu — it will show a visible dark ring inside the cafeteria, which looks completely wrong vs real AU.
+4. fog_cafeteria.html — static test page that renders both normal (550wu) and lights-out (110wu) states instantly for screenshot comparison without loading Phaser.
 
 ## Visibility polygon algorithm (src/utils/visibility.ts)
 - Filters walls within 1.5× radius (squared-distance AABB clamp).
