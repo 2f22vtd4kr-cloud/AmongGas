@@ -106,7 +106,7 @@ function computeVisibilityOld(px,py,radius,wallRects){
 }
 
 // ── Positions & wall data ─────────────────────────────────────────────────────
-const VISION_R = 200;
+const VISION_R = 270;
 const VIEW = 500, SIZE = 380, SCALE = SIZE/VIEW;
 
 const SCENARIOS = [
@@ -157,15 +157,15 @@ function renderPanel(cv, px, py, walls, poly) {
   // Fog composite (mirrors renderFogCanvas in GameScene.ts exactly)
   const fog=document.createElement('canvas'); fog.width=SIZE; fog.height=SIZE;
   const fc=fog.getContext('2d');
-  fc.fillStyle='rgba(10,10,10,0.96)'; fc.fillRect(0,0,SIZE,SIZE);          // Step 1
+  fc.fillStyle='rgba(0,0,0,0.97)'; fc.fillRect(0,0,SIZE,SIZE);             // Step 1
   fc.globalCompositeOperation='destination-out';                             // Step 2
   const vR=VISION_R*SCALE;
   const g=fc.createRadialGradient(spx,spy,0,spx,spy,vR*1.2);
-  g.addColorStop(0,'rgba(0,0,0,1)'); g.addColorStop(0.6,'rgba(0,0,0,1)'); g.addColorStop(1,'rgba(0,0,0,0)');
+  g.addColorStop(0,'rgba(0,0,0,1)'); g.addColorStop(0.9,'rgba(0,0,0,1)'); g.addColorStop(1,'rgba(0,0,0,0)');
   fc.fillStyle=g; fc.fillRect(0,0,SIZE,SIZE);
   if(poly.length>=3){                                                        // Step 3
     fc.globalCompositeOperation='source-over';
-    fc.fillStyle='rgba(10,10,10,0.97)';
+    fc.fillStyle='rgba(0,0,0,0.97)';
     fc.beginPath(); fc.rect(0,0,SIZE,SIZE);
     const[f0x,f0y]=toC(poly[0].x,poly[0].y); fc.moveTo(f0x,f0y);
     for(let i=1;i<poly.length;i++){const[cx,cy]=toC(poly[i].x,poly[i].y);fc.lineTo(cx,cy);}

@@ -940,10 +940,10 @@ export class GameScene extends Phaser.Scene {
    * cannot produce soft gradient edges and was removed from 3.90 typings.
    *
    * Visual result:
-   *   0 … CREW_VISION px   → fully lit (gradient fully erased)
-   *   CREW_VISION … ×1.2   → soft edge (gradient fades to transparent)
-   *   beyond ×1.2           → ~96 % dark (near-black fog)
-   *   wall shadows          → hard edges via even-odd visibility polygon
+   *   0 … CREW_VISION×0.9 px → fully lit (gradient fully erased)
+   *   ×0.9 … ×1.2            → short 10 % soft edge (fades to transparent)
+   *   beyond ×1.2             → 97 % black (pitch-black fog, like real AU)
+   *   wall shadows            → pitch-black hard edges via visibility polygon
    *
    * Impostors get IMP_VISION instead of CREW_VISION.
    * Ghosts see the full map (fog skipped entirely).
@@ -1012,37 +1012,34 @@ export class GameScene extends Phaser.Scene {
     ctx.clearRect(0, 0, W, H);
 
     // ── Step 1: full-screen darkness ─────────────────────────────────────────
-    // Original AU uses a dark navy/blue-gray overlay (~82 % opacity) so map
-    // geometry (floor tiles, wall outlines) barely shows through — matching
-    // the cool "unlit" look of the original game. Wall-shadow areas get a
-    // second near-opaque pass in Step 3 so they stay very dark.
-    ctx.fillStyle = 'rgba(0,5,12,0.40)';
+    // Pure black at 97 % opacity — areas outside the vision disc are pitch
+    // black, exactly matching real Among Us where you cannot see anything
+    // beyond your vision radius.
+    ctx.fillStyle = 'rgba(0,0,0,0.97)';
     ctx.fillRect(0, 0, W, H);
 
     // ── Step 2: erase a soft disc of light at the player ─────────────────────
     // Radial gradient (destination-out): alpha=1 erases the dark fog completely,
     // alpha=0 leaves it untouched. The colour value (black) doesn't matter for
     // destination-out — only the alpha channel is used to punch out the fog.
-    // The solid core extends to 85 % of the radius so the edge is crisp (like
-    // the original), with only a short 15 % soft falloff zone at the boundary.
+    // The solid core extends to 90 % of the disc radius; the final 10 % softly
+    // fades back to black — matching the short, almost-hard edge seen in AU.
     ctx.globalCompositeOperation = 'destination-out';
     const grad = ctx.createRadialGradient(sx, sy, 0, sx, sy, visionR * 1.2);
     grad.addColorStop(0,    'rgba(0,0,0,1)'); // fully bright at player centre
-    grad.addColorStop(0.85, 'rgba(0,0,0,1)'); // still fully bright at 85 % of radius
-    grad.addColorStop(1.0,  'rgba(0,0,0,0)'); // short soft fade at the very edge
+    grad.addColorStop(0.90, 'rgba(0,0,0,1)'); // still fully bright at 90 % of radius
+    grad.addColorStop(1.0,  'rgba(0,0,0,0)'); // short 10 % soft fade at the edge
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, W, H);
 
-    // ── Step 3: hard wall shadows — near-opaque, CLIPPED to the vision disc ──
-    // WHY clip: wall shadows sit on gradient-erased pixels (alpha≈0). Drawing
-    // 0.9 opacity there gives 90 % darkness inside the lit zone. But WITHOUT
-    // clipping, that same fill also covers every pixel outside the disc (which
-    // already has the 0.44 base fog), compounding to ~0.94 opacity — a near-
-    // blackout that kills the "map-always-visible" ambient fog.  Clipping to
-    // the disc means:
+    // ── Step 3: hard wall shadows — pitch-black, CLIPPED to the vision disc ──
+    // WHY clip: wall shadows sit on gradient-erased pixels (alpha≈0). Without
+    // clipping, the shadow fill would also cover the outside-disc area that the
+    // base fill already darkened, doing unnecessary work and risking float-point
+    // rounding artefacts. With the clip:
     //   • inside disc + inside polygon  → fully lit (gradient erased, no fill)
-    //   • inside disc + outside polygon → 90 % dark  (dramatic wall shadow)
-    //   • outside disc                  → 44 % dark  (gentle ambient fog, unchanged)
+    //   • inside disc + outside polygon → 97 % black (wall shadow)
+    //   • outside disc                  → 97 % black (base fog, unchanged)
     const worldPoly = computeVisibilityPolygon(
       this.player.x, this.player.y, (visionR * 1.2) / cam.zoom, this.wallRects,
     );
@@ -1057,7 +1054,7 @@ export class GameScene extends Phaser.Scene {
       ctx.clip();
 
       ctx.globalCompositeOperation = 'source-over';
-      ctx.fillStyle = 'rgba(0,2,8,0.90)'; // near-opaque — dramatic wall shadows
+      ctx.fillStyle = 'rgba(0,0,0,0.97)'; // pitch-black wall shadows, matching AU
       ctx.beginPath();
       ctx.rect(0, 0, W, H);                                // outer boundary
       ctx.moveTo(toSx(worldPoly[0].x), toSy(worldPoly[0].y));

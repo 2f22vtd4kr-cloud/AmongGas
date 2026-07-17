@@ -17,7 +17,7 @@
 <script>
 // ── Game constants (from settings.ts) ─────────────────────────────────────────
 const CAMERA_ZOOM = 1.45;
-const CREW_VISION = 200;   // world units  (r = 200 wu → 290 px at zoom 1.45)
+const CREW_VISION = 270;   // world units  (r = 270 wu → 202.5 px at zoom 0.75)
 const GAME_W = 750, GAME_H = 1334;
 
 // ── Visibility algorithm helpers ──────────────────────────────────────────────
@@ -124,14 +124,14 @@ function renderGamePanel(cv, mapImg, px, py, poly) {
   const fc = fog.getContext('2d');
 
   // Step 1: full darkness
-  fc.fillStyle = 'rgba(10,10,10,0.96)';
+  fc.fillStyle = 'rgba(0,0,0,0.97)';
   fc.fillRect(0, 0, GAME_W, GAME_H);
 
   // Step 2: cut circular gradient hole
   fc.globalCompositeOperation = 'destination-out';
   const g = fc.createRadialGradient(sx, sy, 0, sx, sy, visionR * 1.2);
   g.addColorStop(0,   'rgba(0,0,0,1)');
-  g.addColorStop(0.60,'rgba(0,0,0,1)');
+  g.addColorStop(0.90,'rgba(0,0,0,1)');
   g.addColorStop(1.0, 'rgba(0,0,0,0)');
   fc.fillStyle = g;
   fc.fillRect(0, 0, GAME_W, GAME_H);
@@ -139,7 +139,7 @@ function renderGamePanel(cv, mapImg, px, py, poly) {
   // Step 3: re-darken wall shadows via even-odd fill
   if (poly.length >= 3) {
     fc.globalCompositeOperation = 'source-over';
-    fc.fillStyle = 'rgba(10,10,10,0.97)';
+    fc.fillStyle = 'rgba(0,0,0,0.97)';
     fc.beginPath();
     fc.rect(0, 0, GAME_W, GAME_H);
     fc.moveTo(toSx(poly[0].x), toSy(poly[0].y));

@@ -9,22 +9,18 @@ description: How the fog-of-war works in GameScene — native Canvas 2D offscree
 An offscreen `HTMLCanvasElement` (`fogCanvas`, 750×1334) is composited onto the live Phaser game canvas each frame via the `uiCamera.prerender` event (fires after the world camera has drawn, before the HUD camera draws its objects). Phaser is forced to Canvas renderer in `main.ts`; never switch to WebGL or `getContext('2d')` on the game canvas returns null.
 
 ## Four-step render (renderFogCanvas in GameScene.ts)
-1. Fill offscreen with dark navy overlay `rgba(0,5,12,0.40)` — 40% opaque; open foggy areas outside the disc show at ~60% brightness.
-2. `destination-out` radial gradient punches a soft disc of light at the player's screen position. Gradient stops: opaque 0→85% of `visionR*1.2`, fades to transparent at `visionR*1.2` (15% soft edge).
-3. `source-over` even-odd fill re-darkens wall-shadow areas with `rgba(0,2,8,0.90)` — **clipped to the vision disc** (see critical rule below). Path = full-canvas rect + visibility polygon; even-odd fills regions *outside* the polygon.
+1. Fill offscreen with `rgba(0,0,0,0.97)` — near-total black; areas outside the disc are pitch black, matching real Among Us where nothing is visible beyond vision.
+2. `destination-out` radial gradient punches a soft disc of light at the player's screen position. Gradient stops: opaque 0→90% of `visionR*1.2`, fades to transparent at `visionR*1.2` (10% soft edge — short, crisper than 15%).
+3. `source-over` even-odd fill re-darkens wall-shadow areas with `rgba(0,0,0,0.97)` — **clipped to the vision disc** (see critical rule below). Path = full-canvas rect + visibility polygon; even-odd fills regions *outside* the polygon.
 4. `gameCtx.save()` / `drawImage(fogCanvas, 0, 0)` / `gameCtx.restore()` blits onto the live canvas. Always save/restore and set identity transform before drawing — Phaser may leave the context in a non-default state.
 
 ## Critical rule: wall shadows MUST be clipped to the vision disc
 Step 3 uses `ctx.save() → ctx.arc(…).clip() → fill → ctx.restore()` to restrict the fill to the vision disc.
 
-**Why this matters (opacity arithmetic):**
-- Inside disc + gradient-erased: pixel alpha ≈ 0. Drawing 0.90 on top → 90% dark. ✓
-- Without clip: that same 0.90 fill also covers outside-disc pixels already at 0.40 from step 1, compounding to ~0.94 → near-blackout, killing the "map still visible" ambient effect. ✗
-
-**Result with clip:**
+**Why this matters:** Without clip, the shadow fill covers outside-disc pixels that are already ~0.97 dark, doing redundant work and risking rounding artefacts. With clip:
 - Inside disc + inside polygon (visible area): 0% fog → fully lit
-- Inside disc + outside polygon (wall shadow): 0.90 fog → map at ~10% (dramatic, dark)
-- Outside disc: 0.40 base fog → map at ~60% (gentle ambient fog)
+- Inside disc + outside polygon (wall shadow): 0.97 fog → pitch black
+- Outside disc: 0.97 base fog → pitch black (unchanged)
 
 ## Critical correctness rule: polygon radius = visionR × 1.2
 Compute polygon with `radius = (visionR * 1.2) / cam.zoom` (world units), NOT `visionR / cam.zoom`.
@@ -32,9 +28,9 @@ Compute polygon with `radius = (visionR * 1.2) / cam.zoom` (world units), NOT `v
 **Why:** The gradient's soft falloff zone runs from 85% to 100% of `visionR*1.2`. If the polygon only extends to `visionR`, the even-odd fill re-darkens the entire falloff zone, killing the soft edge. Using `visionR*1.2` as the polygon boundary matches the gradient's outer edge.
 
 ## Vision radii (settings.ts)
-- `CREW_VISION = 420` world units — ~13 tiles ≈ 2 rooms, 84% of screen half-width at zoom 0.75 (portrait-calibrated)
-- `IMP_VISION = 590` — ~1.4× crew
-- `CREW_VISION_SABOTAGED = 110` — lights-out "barely see your feet" mode
+- `CREW_VISION = 270` world units — ~8.4 tiles, 54% of screen half-width at zoom 0.75; matches AU default 1× crew vision feel
+- `IMP_VISION = 390` — ~1.44× crew (~12 tiles)
+- `CREW_VISION_SABOTAGED = 75` — lights-out "barely see your feet" (~2.3 tiles), scaled proportionally from CREW_VISION
 - `CAMERA_ZOOM = 0.75`
 
 ## Visibility polygon algorithm (src/utils/visibility.ts)

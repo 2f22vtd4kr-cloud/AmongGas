@@ -101,14 +101,14 @@ function applyFog(ctx, poly, shadowTables){
   fog.width=CW; fog.height=CH;
   const fc=fog.getContext('2d');
 
-  fc.fillStyle='rgba(0,5,12,0.40)';
+  fc.fillStyle='rgba(0,0,0,0.97)';
   fc.fillRect(0,0,CW,CH);
 
   const sx=tx(PLAYER.x),sy=ty(PLAYER.y),visionR=VISION_R*SCALE;
   fc.globalCompositeOperation='destination-out';
   const g=fc.createRadialGradient(sx,sy,0,sx,sy,visionR*1.2);
   g.addColorStop(0,'rgba(0,0,0,1)');
-  g.addColorStop(0.85,'rgba(0,0,0,1)'); // crisp edge: only 15% soft falloff
+  g.addColorStop(0.90,'rgba(0,0,0,1)'); // crisp edge: only 10% soft falloff
   g.addColorStop(1,'rgba(0,0,0,0)');
   fc.fillStyle=g; fc.fillRect(0,0,CW,CH);
 
@@ -117,7 +117,7 @@ function applyFog(ctx, poly, shadowTables){
     fc.save();
     fc.beginPath(); fc.arc(sx,sy,visionR*1.2,0,Math.PI*2); fc.clip();
     fc.globalCompositeOperation='source-over';
-    fc.fillStyle='rgba(0,2,8,0.90)'; // near-opaque — dramatic wall shadows
+    fc.fillStyle='rgba(0,0,0,0.97)'; // pitch-black wall shadows, matching AU
     fc.beginPath(); fc.rect(0,0,CW,CH);
     fc.moveTo(tx(poly[0].x),ty(poly[0].y));
     for(let i=1;i<poly.length;i++) fc.lineTo(tx(poly[i].x),ty(poly[i].y));
