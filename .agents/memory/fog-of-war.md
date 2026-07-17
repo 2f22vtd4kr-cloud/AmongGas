@@ -28,10 +28,13 @@ Compute polygon with `radius = (visionR * 1.2) / cam.zoom` (world units), NOT `v
 **Why:** The gradient's soft falloff zone runs from 85% to 100% of `visionR*1.2`. If the polygon only extends to `visionR`, the even-odd fill re-darkens the entire falloff zone, killing the soft edge. Using `visionR*1.2` as the polygon boundary matches the gradient's outer edge.
 
 ## Vision radii (settings.ts)
-- `CREW_VISION = 270` world units — ~8.4 tiles, 54% of screen half-width at zoom 0.75; matches AU default 1× crew vision feel
-- `IMP_VISION = 390` — ~1.44× crew (~12 tiles)
-- `CREW_VISION_SABOTAGED = 75` — lights-out "barely see your feet" (~2.3 tiles), scaled proportionally from CREW_VISION
+- `CREW_VISION = 420` world units — covers the whole cafeteria (~270wu half-width) so you see the full room you're standing in; dark only at screen edges, matching real AU default. Do NOT reduce this — a smaller value makes rooms look truncated by a visible dark ring inside the room.
+- `IMP_VISION = 590` — ~1.4× crew
+- `CREW_VISION_SABOTAGED = 110` — lights-out "barely see your feet" glow (~3.4 tiles, ~26% of normal); the contrast between 420 and 110 is what makes the lights sabotage feel scary
 - `CAMERA_ZOOM = 0.75`
+
+## Critical sizing insight (learned from reference images)
+The vision radius must be ≥ the room half-width so the player sees the whole room from its center with no dark edges cutting into it. Cafeteria half-width ≈ 270wu → 420wu comfortably covers it. A value of 270wu creates a visible dark circle inside the room, which looks completely wrong vs real AU.
 
 ## Visibility polygon algorithm (src/utils/visibility.ts)
 - Filters walls within 1.5× radius (squared-distance AABB clamp).
