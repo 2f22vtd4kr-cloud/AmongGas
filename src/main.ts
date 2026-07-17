@@ -105,9 +105,18 @@ const game = new Phaser.Game(config);
 // Prevent Phaser from pausing the game loop when the browser tab loses focus
 // or the page visibility changes — required for screenshot capture tools that
 // load the page in a background context.
-// 'pause' fires after Phaser has already set its paused flag; resuming here
-// immediately cancels the pause so rendering continues every tick.
-game.events.on('pause', () => { game.resume(); });
+//
+// IMPORTANT: game.resume() sets isPaused=false but does NOT restart the
+// TimeStep loop that game.onHidden() paused via this.loop.pause(). Only
+// game.onVisible() correctly does both loop.resume() + isPaused=false.
+// Calling resume() alone leaves the loop permanently dead (getImageData
+// returns background colour forever in headless Chrome).
+game.events.on('pause', () => {
+  (game as unknown as { onVisible(): void }).onVisible();
+});
+
+// Expose the Phaser game instance as a global for diagnostics (dev only)
+(window as unknown as Record<string, unknown>).__phaserGame = game;
 
 // Hide HTML loading screen once Phaser is ready
 game.events.once('ready', () => {

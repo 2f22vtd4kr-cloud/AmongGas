@@ -460,6 +460,24 @@ export class GameScene extends Phaser.Scene {
       // Probe canvas dimensions immediately from create() to help diagnose sizing issues.
       console.log('[capture] create() canvas=', this.game.canvas.width, 'x', this.game.canvas.height,
         ' scale.gameSize=', this.scale.gameSize.width, 'x', this.scale.gameSize.height);
+      // Bright debug rect at screen centre — scroll-factor 0 so it stays fixed on screen
+      // regardless of camera scroll/zoom; drawn at depth 9999 so it's always on top.
+      // Remove once rendering is confirmed working.
+      const dbgRect = this.add.rectangle(375, 667, 120, 120, 0x00ff00, 1)
+        .setScrollFactor(0).setDepth(9999);
+      // Also log camera state after a tick
+      this.time.delayedCall(200, () => {
+        const cam = this.cameras.main;
+        const texOk = this.textures.exists('map_bg');
+        console.log('[debug] camera scroll=(' + cam.scrollX.toFixed(0) + ',' + cam.scrollY.toFixed(0) + ')'
+          + ' zoom=' + cam.zoom + ' mapTex=' + texOk
+          + ' rect.visible=' + dbgRect.visible + ' rect.active=' + dbgRect.active
+          + ' cam.ignore contains rect=' + (cam as unknown as {list:unknown[]}).list?.some?.((o: unknown) => o === dbgRect));
+        console.log('[debug] scene.children count=' + this.children.list.length
+          + ' scene.active=' + this.sys.isActive()
+          + ' scene.visible=' + this.sys.isVisible());
+      });
+
 
       // Capture at 3 s (after autoplay walk has started) using setTimeout so this
       // works even when Phaser's render loop is throttled in headless mode.
@@ -569,17 +587,19 @@ export class GameScene extends Phaser.Scene {
   private startAutoplay(mode: string) {
     const S = PLAYER_SPEED;
 
-    // For walk/meeting/minimap modes: teleport to the cafeteria centre so the
-    // screenshot shows a colourful room, not the transparent outer-space area
-    // where PLAYER_SPAWN (4528, 1712) sits in the map PNG.
+    // For walk/meeting/minimap modes: teleport to the Security room, which has
+    // the brightest map art (brightness≈220, green-cyan monitors) so the
+    // gameplay screenshot shows real room content rather than dark outer-space.
+    // Security centre: world (1877, 1095).  Camera snapped immediately (no lerp
+    // lag) so the first capture at t=1 s already shows the room.
     if (mode !== 'task') {
-      this.player?.setPosition(3277, 658);
-      // Snap the camera immediately (bypass lerp) so it's on the cafeteria even
+      this.player?.setPosition(1877, 1095);
+      // Snap the camera immediately (bypass lerp) so it's on the room even
       // at the first capture frame (t=1 s). Without this it lerps slowly from
-      // PLAYER_SPAWN and still shows transparent space at t=1 s.
+      // PLAYER_SPAWN and still shows dark outer-space at t=1 s.
       this.cameras.main.stopFollow();
-      this.cameras.main.scrollX = 3277 - (750 / 2 / CAMERA_ZOOM);
-      this.cameras.main.scrollY = 658  - (1334 / 2 / CAMERA_ZOOM);
+      this.cameras.main.scrollX = 1877 - (750 / 2 / CAMERA_ZOOM);
+      this.cameras.main.scrollY = 1095 - (1334 / 2 / CAMERA_ZOOM);
       this.cameras.main.startFollow(this.player, true, 0.12, 0.12);
     }
 
@@ -1188,7 +1208,7 @@ export class GameScene extends Phaser.Scene {
   private renderFogCanvas() {
     if (!this.fogCtx || !this.fogCanvas || !this.player) return;
     if (!this.player.isAlive) return;
-    if (new URLSearchParams(window.location.search).get('debugNoFog')) return;
+    if (new URLSearchParams(window.location.search).get('debugNoFog') !== null) return;
 
     const cam  = this.cameras.main;
     const W    = this.fogCanvas.width;
